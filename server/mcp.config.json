@@ -1,0 +1,31 @@
+{
+  "servers": {
+    "email": {
+      "command": "node",
+      "args": ["../../mcp-servers/mcp-email.js"],
+      "domains": ["messagerie", "communication"],
+      "description": "Gestion multi-comptes email (IMAP/SMTP) : The French Miller, Wearerockmetal, Yahoo"
+    },
+    "instagram": {
+      "command": "node",
+      "args": ["../../mcp-servers/mcp-instagram.js"],
+      "domains": ["reseaux-sociaux"],
+      "description": "Instagram : profil, posts récents, insights (The French Miller, WARM-TV)"
+    },
+    "dev": {
+      "command": "node",
+      "args": ["../../mcp-servers/mcp-dev.js"],
+      "domains": ["code", "fichiers"],
+      "description": "Lecture et écriture de fichiers locaux pour l'assistance développement"
+    },
+    "websearch": {
+  "command": "npx",
+  "args": ["-y", "@modelcontextprotocol/server-brave-search"],
+  "env": {
+    "BRAVE_API_KEY": "${BRAVE_API_KEY}"
+  },
+  "domains": ["recherche", "web"],
+  "description": "Recherche web en temps réel via Brave Search"
+}
+  }
+}
