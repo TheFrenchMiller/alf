@@ -80,9 +80,9 @@ export default function EmailReadRenderer({ action }: EmailReadRendererProps) {
 
           {!isError && !isNotFound && (
             <div className="p-2 overflow-y-auto border rounded bg-alf-panel border-alf-border/50 max-h-96">
-              <pre className="font-sans text-xs leading-relaxed break-words whitespace-pre-wrap text-alf-text/80">
-                {cleanBody || "(vide)"}
-              </pre>
+              <pre className="font-sans text-xs leading-relaxed whitespace-pre-wrap text-alf-text/80 [overflow-wrap:anywhere]">
+  {cleanBody || "(vide)"}
+</pre>
             </div>
           )}
         </>

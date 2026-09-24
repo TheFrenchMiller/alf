@@ -43,12 +43,10 @@ function substituteEnvVars(value: string): string {
 function resolveServerConfig(config: McpServerConfig): McpServerConfig {
   const resolved: McpServerConfig = { ...config };
 
-  // Substitue dans les args
   if (resolved.args) {
     resolved.args = resolved.args.map(substituteEnvVars);
   }
 
-  // Substitue dans env
   if (resolved.env) {
     const newEnv: Record<string, string> = {};
     for (const [key, value] of Object.entries(resolved.env)) {
@@ -60,12 +58,35 @@ function resolveServerConfig(config: McpServerConfig): McpServerConfig {
   return resolved;
 }
 
+/**
+ * Filtre process.env pour ne garder que les valeurs définies (non-undefined).
+ * Nécessaire car NodeJS.ProcessEnv est de type Record<string, string | undefined>.
+ */
+function getCleanEnv(): Record<string, string> {
+  const clean: Record<string, string> = {};
+  for (const [key, value] of Object.entries(process.env)) {
+    if (value !== undefined) {
+      clean[key] = value;
+    }
+  }
+  return clean;
+}
+
 export class McpManager {
   private servers: Map<string, ManagedServer> = new Map();
   private toolsIndex: Map<string, ToolDefinition> = new Map();
 
   constructor(configPath?: string) {
-    const path = configPath || resolve(__dirname, "mcp.config.json");
+    // Résolution du chemin de config :
+    // - Priorité 1 : paramètre explicite (mode programmatique)
+    // - Priorité 2 : variable d'environnement ALF_MCP_CONFIG_PATH (mode exe compilé)
+    // - Priorité 3 : __dirname (mode dev, npm run server)
+    const path =
+      configPath ||
+      process.env.ALF_MCP_CONFIG_PATH ||
+      resolve(__dirname, "mcp.config.json");
+
+    console.log(`[MCP] Chargement de la config depuis : ${path}`);
     const raw = readFileSync(path, "utf-8");
     const config: McpConfig = JSON.parse(raw);
 
@@ -91,8 +112,17 @@ export class McpManager {
     try {
       console.log(`[MCP] Connexion à ${server.id}...`);
 
+      // Résolution des chemins vers les scripts MCP :
+      // - Mode exe compilé : MCP_SERVERS_DIR contient le dossier mcp-servers/
+      //   → on extrait le basename (mcp-email.js) et on résout depuis ce dossier
+      // - Mode dev : __dirname est le dossier server/, on résout le chemin relatif
+      const mcpServersDir = process.env.MCP_SERVERS_DIR;
       const resolvedArgs = server.config.args.map((arg) => {
         if (arg.startsWith("./") || arg.startsWith("../")) {
+          if (mcpServersDir) {
+            const basename = arg.split("/").pop() || arg;
+            return resolve(mcpServersDir, basename);
+          }
           return resolve(__dirname, arg);
         }
         return arg;
@@ -102,7 +132,7 @@ export class McpManager {
         command: server.config.command,
         args: resolvedArgs,
         env: {
-          ...process.env,
+          ...getCleanEnv(),
           ...(server.config.env || {}),
         },
       });

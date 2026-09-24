@@ -3,6 +3,9 @@ import DefaultRenderer from "./DefaultRenderer";
 import EmailListRenderer from "./EmailListRenderer";
 import EmailReadRenderer from "./EmailReadRenderer";
 import EmailSendRenderer from "./EmailSendRenderer";
+import WordPressDraftRenderer from "./WordPressDraftRenderer";
+import WordPressYoastRenderer from "./WordPressYoastRenderer";
+import WordPressModifyRenderer from "./WordPressModifyRenderer";
 
 interface ActionDispatcherProps {
   action: Action;
@@ -37,6 +40,51 @@ export function ActionDispatcher({ action }: ActionDispatcherProps) {
         />
       );
 
+    case "wp_creer_brouillon":
+      return (
+        <WordPressDraftRenderer
+          pending={{
+            id: `executed-${action.timestamp}`,
+            toolName: action.toolName,
+            serverId: action.serverId,
+            args: action.args,
+            createdAt: action.timestamp,
+          }}
+          executed={action}
+          onValidate={() => {}}
+        />
+      );
+
+    case "wp_definir_yoast":
+      return (
+        <WordPressYoastRenderer
+          pending={{
+            id: `executed-${action.timestamp}`,
+            toolName: action.toolName,
+            serverId: action.serverId,
+            args: action.args,
+            createdAt: action.timestamp,
+          }}
+          executed={action}
+          onValidate={() => {}}
+        />
+      );
+
+    case "wp_modifier_article":
+      return (
+        <WordPressModifyRenderer
+          pending={{
+            id: `executed-${action.timestamp}`,
+            toolName: action.toolName,
+            serverId: action.serverId,
+            args: action.args,
+            createdAt: action.timestamp,
+          }}
+          executed={action}
+          onValidate={() => {}}
+        />
+      );
+
     default:
       return <DefaultRenderer action={action} />;
   }
@@ -57,6 +105,37 @@ export function PendingActionDispatcher({
     );
   }
 
+  if (pending.toolName === "wp_creer_brouillon") {
+    return (
+      <WordPressDraftRenderer
+        pending={pending}
+        executed={executed}
+        onValidate={onValidate}
+      />
+    );
+  }
+
+  if (pending.toolName === "wp_definir_yoast") {
+    return (
+      <WordPressYoastRenderer
+        pending={pending}
+        executed={executed}
+        onValidate={onValidate}
+      />
+    );
+  }
+
+  if (pending.toolName === "wp_modifier_article") {
+    return (
+      <WordPressModifyRenderer
+        pending={pending}
+        executed={executed}
+        onValidate={onValidate}
+      />
+    );
+  }
+
+  // Fallback pour les futurs pending tools
   return (
     <div className="p-3 text-xs border rounded-md border-amber-700 bg-amber-950/20">
       <div className="mb-2 font-medium text-amber-400">

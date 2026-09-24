@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "alf-201-hq",
+  "productName": "Alf",
   "version": "0.1.0",
-  "identifier": "com.erwan.alf-201-hq",
+  "identifier": "com.erwan.alf",
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1420",
@@ -12,9 +12,12 @@
   "app": {
     "windows": [
       {
-        "title": "alf-201-hq",
-        "width": 800,
-        "height": 600
+        "title": "Alf 2.0.1",
+        "width": 1400,
+        "height": 900,
+        "minWidth": 1000,
+        "minHeight": 700,
+        "resizable": true
       }
     ],
     "security": {
@@ -23,13 +26,16 @@
   },
   "bundle": {
     "active": true,
-    "targets": "all",
+    "targets": ["nsis"],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
+    ],
+    "externalBin": [
+      "binaries/alf-backend"
     ]
   }
 }

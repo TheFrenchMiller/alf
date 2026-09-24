@@ -6,7 +6,7 @@
   "permissions": [
     "core:default",
     "opener:default",
-     "core:webview:allow-get-all-webviews",
+    "core:webview:allow-get-all-webviews",
     "core:webview:allow-set-webview-zoom",
     "core:webview:allow-print",
     "core:webview:allow-internal-toggle-devtools",
@@ -14,6 +14,26 @@
     "core:webview:allow-webview-close",
     "core:webview:allow-webview-hide",
     "core:webview:allow-webview-show",
-    "core:webview:allow-webview-size"
+    "core:webview:allow-webview-size",
+    {
+      "identifier": "shell:allow-execute",
+      "allow": [
+        {
+          "name": "binaries/alf-backend",
+          "sidecar": true,
+          "args": false
+        }
+      ]
+    },
+    {
+      "identifier": "shell:allow-spawn",
+      "allow": [
+        {
+          "name": "binaries/alf-backend",
+          "sidecar": true,
+          "args": false
+        }
+      ]
+    }
   ]
 }

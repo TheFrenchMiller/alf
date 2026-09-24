@@ -1,17 +1,19 @@
 import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
-import { resolve, dirname } from "path";
-import { fileURLToPath } from "url";
+import { resolve } from "path";
 import { McpManager } from "./mcp-manager.js";
 import { Orchestrator } from "./orchestrator.js";
 import type { ChatRequest, ChatResponse, StatusResponse } from "./types.js";
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
+// Résolution du chemin du .env :
+// - En mode dev (npm run server) : ../../mcp-servers/.env relatif à server/
+// - En mode exe compilé : fourni via la variable ALF_ENV_PATH par Tauri
+const envPath =
+  process.env.ALF_ENV_PATH || resolve(process.cwd(), "../mcp-servers/.env");
 
-// Charge le .env depuis le dossier mcp-servers
-dotenv.config({ path: resolve(__dirname, "../../mcp-servers/.env") });
+console.log(`[Orchestrateur] Chargement du .env depuis : ${envPath}`);
+dotenv.config({ path: envPath });
 
 const PORT = 3001;
 
@@ -19,7 +21,7 @@ async function main() {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
     console.error(
-      "[ERREUR] GEMINI_API_KEY manquante. Vérifie ton .env dans mcp-servers/"
+      `[ERREUR] GEMINI_API_KEY manquante. Chemin testé : ${envPath}`
     );
     process.exit(1);
   }

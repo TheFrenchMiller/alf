@@ -13,6 +13,7 @@ import type {
   Action,
 } from "./types";
 import { useSpeech } from "./hooks/useSpeech";
+import { useBackend } from "./hooks/useBackend";
 
 function cleanForSpeech(text: string): string {
   return text
@@ -45,13 +46,19 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [voiceEnabled, setVoiceEnabled] = useState(true);
 
+  // Lancement du backend (sidecar) au démarrage
+  const { status: backendStatus, error: backendError } = useBackend();
+
   const { isSupported: voiceSupported, isSpeaking, speak, stop } = useSpeech({
     lang: "fr-FR",
     rate: 1.0,
     pitch: 1.0,
   });
 
+  // Bootstrap : ne se lance QUE quand le backend est prêt
   useEffect(() => {
+    if (backendStatus !== "ready") return;
+
     async function bootstrap() {
       try {
         const status = await getStatus();
@@ -60,13 +67,13 @@ export default function App() {
         setTools(toolsRes.all);
       } catch (e) {
         setError(
-          "Impossible de contacter l'orchestrateur. Vérifie que 'npm run server' tourne sur le port 3001."
+          "Impossible de contacter l'orchestrateur. Vérifie que le backend tourne bien sur le port 3001."
         );
         setAgentState("error");
       }
     }
     bootstrap();
-  }, []);
+  }, [backendStatus]);
 
   async function handleSend(prompt: string) {
     stop();
@@ -170,6 +177,34 @@ export default function App() {
     }
   }, [isSpeaking, agentState, voiceEnabled]);
 
+  // --- Écrans de démarrage ---
+  if (backendStatus === "starting") {
+    return (
+      <div className="flex items-center justify-center h-screen bg-alf-bg text-alf-text">
+        <div className="text-center">
+          <div className="mb-4 text-lg">Démarrage d'Alf...</div>
+          <div className="text-sm text-alf-muted">
+            Initialisation du backend en cours
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (backendStatus === "error") {
+    return (
+      <div className="flex items-center justify-center h-screen text-red-400 bg-alf-bg">
+        <div className="max-w-md text-center">
+          <div className="mb-4 text-lg">Erreur de démarrage</div>
+          <div className="text-sm">
+            {backendError || "Impossible de lancer le backend."}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // --- Interface principale ---
   return (
     <div className="flex flex-col h-screen bg-alf-bg text-alf-text">
       <header className="flex items-center justify-between px-6 py-3 border-b border-alf-border bg-alf-panel">

@@ -19,13 +19,19 @@
       "description": "Lecture et écriture de fichiers locaux pour l'assistance développement"
     },
     "websearch": {
-  "command": "npx",
-  "args": ["-y", "@modelcontextprotocol/server-brave-search"],
-  "env": {
-    "BRAVE_API_KEY": "${BRAVE_API_KEY}"
-  },
-  "domains": ["recherche", "web"],
-  "description": "Recherche web en temps réel via Brave Search"
-}
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-brave-search"],
+      "env": {
+        "BRAVE_API_KEY": "${BRAVE_API_KEY}"
+      },
+      "domains": ["recherche", "web"],
+      "description": "Recherche web en temps réel via Brave Search"
+    },
+    "wordpress": {
+      "command": "node",
+      "args": ["../../mcp-servers/mcp-wordpress.js"],
+      "domains": ["wordpress", "redaction"],
+      "description": "WordPress WARM-TV : lister, lire, chercher, créer et modifier des articles"
+    }
   }
 }
