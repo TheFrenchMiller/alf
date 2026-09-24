@@ -37,3 +37,6 @@ Thumbs.db
 
 # Tauri
 src-tauri/gen/
+
+# Sidecar Tauri compilé (régénérable via bun build)
+src-tauri/binaries/
