@@ -137,11 +137,12 @@ export class McpManager {
         },
       });
 
-      const client = new Client(
-        { name: `alf-orchestrator-${server.id}`, version: "1.0.0" },
-        { capabilities: {} }
-      );
-
+const client = new Client(
+  { name: `alf-orchestrator-${server.id}`, version: "1.0.0" },
+  { 
+    capabilities: {},
+  }
+);
       await client.connect(transport);
 
       const list = await client.listTools();
@@ -202,11 +203,16 @@ export class McpManager {
       throw new Error(`Serveur MCP "${tool.serverId}" non connecté`);
     }
 
-    const result = await server.client.callTool({
-      name,
-      arguments: args,
-    });
-
+const result = await server.client.callTool(
+  {
+    name,
+    arguments: args,
+  },
+  undefined,
+  {
+    timeout: 600000,  // 10 minutes
+  }
+);
     const content = result.content as Array<{ type: string; text?: string }>;
     if (Array.isArray(content)) {
       return content

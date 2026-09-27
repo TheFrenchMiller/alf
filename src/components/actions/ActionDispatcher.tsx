@@ -6,6 +6,7 @@ import EmailSendRenderer from "./EmailSendRenderer";
 import WordPressDraftRenderer from "./WordPressDraftRenderer";
 import WordPressYoastRenderer from "./WordPressYoastRenderer";
 import WordPressModifyRenderer from "./WordPressModifyRenderer";
+import PrepareArticleRenderer from "./PrepareArticleRenderer";
 
 interface ActionDispatcherProps {
   action: Action;
@@ -85,6 +86,21 @@ export function ActionDispatcher({ action }: ActionDispatcherProps) {
         />
       );
 
+    case "preparer_article_avec_images":
+      return (
+        <PrepareArticleRenderer
+          pending={{
+            id: `executed-${action.timestamp}`,
+            toolName: action.toolName,
+            serverId: action.serverId,
+            args: action.args,
+            createdAt: action.timestamp,
+          }}
+          executed={action}
+          onValidate={() => {}}
+        />
+      );
+
     default:
       return <DefaultRenderer action={action} />;
   }
@@ -128,6 +144,16 @@ export function PendingActionDispatcher({
   if (pending.toolName === "wp_modifier_article") {
     return (
       <WordPressModifyRenderer
+        pending={pending}
+        executed={executed}
+        onValidate={onValidate}
+      />
+    );
+  }
+
+  if (pending.toolName === "preparer_article_avec_images") {
+    return (
+      <PrepareArticleRenderer
         pending={pending}
         executed={executed}
         onValidate={onValidate}

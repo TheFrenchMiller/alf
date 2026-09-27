@@ -3,8 +3,6 @@ import { Command, type Child } from "@tauri-apps/plugin-shell";
 
 type BackendStatus = "starting" | "ready" | "error";
 
-// ⚠️ Chemins absolus vers les fichiers de config.
-// À adapter si tu déplaces le projet ou changes de machine.
 const ENV_PATH =
   "D:\\Documents\\2026 - Web\\2026.09_DEV_GEMINI\\mcp-servers\\.env";
 const MCP_CONFIG_PATH =
@@ -13,17 +11,16 @@ const MCP_SERVERS_DIR =
   "D:\\Documents\\2026 - Web\\2026.09_DEV_GEMINI\\mcp-servers";
 const DEV_ROOT_PATH = "D:\\Documents\\2026 - Web";
 
-/**
- * Lance le backend Alf (sidecar) au démarrage de l'application.
- * Attend qu'il soit prêt avant de renvoyer "ready".
- * Le backend écoute ensuite sur http://localhost:3001 comme d'habitude.
- */
 export function useBackend() {
   const [status, setStatus] = useState<BackendStatus>("starting");
   const [error, setError] = useState<string | null>(null);
   const childRef = useRef<Child | null>(null);
+  const startedRef = useRef(false);
 
   useEffect(() => {
+    if (startedRef.current) return;
+    startedRef.current = true;
+
     let mounted = true;
 
     async function start() {
@@ -38,12 +35,21 @@ export function useBackend() {
           },
         });
 
-        // Écoute des logs du backend (pour debug)
         command.stdout.on("data", (line) => {
           console.log("[Backend]", line);
         });
+
         command.stderr.on("data", (line) => {
-          console.error("[Backend ERR]", line);
+          const lineStr = String(line);
+          const isLikelyInfo =
+            lineStr.includes("injected env") ||
+            lineStr.includes("running on stdio") ||
+            lineStr.includes("MCP Server");
+          if (isLikelyInfo) {
+            console.log("[Backend]", lineStr);
+          } else {
+            console.error("[Backend ERR]", lineStr);
+          }
         });
 
         command.on("close", (data) => {
@@ -61,8 +67,7 @@ export function useBackend() {
         childRef.current = child;
         console.log("[Backend] Sidecar lancé, attente de disponibilité...");
 
-        // Polling : attend que le serveur réponde sur /status
-        const ok = await waitForBackend(20000);
+        const ok = await waitForBackend(90000);
         if (mounted) {
           if (ok) {
             console.log("[Backend] Prêt.");
@@ -97,18 +102,42 @@ export function useBackend() {
 }
 
 /**
- * Poll /status jusqu'à ce que le backend soit prêt, ou timeout.
+ * Poll /status avec un timeout strict par requête.
+ * fetch() peut bloquer indéfiniment si la connexion TCP est ouverte
+ * mais que le serveur ne répond pas — on force un timeout via AbortController.
  */
 async function waitForBackend(timeoutMs: number): Promise<boolean> {
   const startTime = Date.now();
+  let attempts = 0;
+
   while (Date.now() - startTime < timeoutMs) {
+    attempts++;
+
     try {
-      const res = await fetch("http://localhost:3001/status");
-      if (res.ok) return true;
+      const controller = new AbortController();
+      const fetchTimeout = setTimeout(() => controller.abort(), 2000);
+
+      const res = await fetch("http://localhost:3001/status", {
+        signal: controller.signal,
+      });
+      clearTimeout(fetchTimeout);
+
+      if (res.ok) {
+        console.log(`[Backend] Prêt après ${attempts} tentative(s)`);
+        return true;
+      }
     } catch {
-      // Pas encore prêt, on réessaie
+      // Timeout ou erreur de connexion — on réessaie
     }
+
+    if (attempts % 10 === 0) {
+      const elapsed = Math.round((Date.now() - startTime) / 1000);
+      console.log(`[Backend] En attente... ${elapsed}s`);
+    }
+
     await new Promise((r) => setTimeout(r, 500));
   }
+
+  console.error(`[Backend] Timeout après ${timeoutMs / 1000}s`);
   return false;
 }
