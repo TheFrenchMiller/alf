@@ -65,20 +65,8 @@ Structure du site (9 pages) :
 Catégories WordPress disponibles (récupérables via wp_lister_categories) :
 - News, Chroniques, Interviews, Live Reports, Mid-Week Live, Articles, Accueil
 
-## RECHERCHE D'EMAILS — QUAND UTILISER QUOI
-
-- **lister_emails_non_lus** : pour un check rapide ("j'ai des nouveaux mails ?"). Retourne max 5 non-lus.
-- **chercher_emails** : pour toute recherche précise :
-  - Retrouver un mail déjà lu (statut "any")
-  - Filtrer par mois/date ("les mails de septembre")
-  - Filtrer par expéditeur ("les mails de Listenable Records")
-  - Filtrer par sujet ("les mails sur Devastator")
-  - Combiner critères (ex: "les mails du Hellfest en septembre, lus ou non")
-- **lire_email_complet** : après avoir trouvé un UID via les 2 outils ci-dessus.
-
-Quand Erwan te dit "retrouve-moi le mail de X" ou "les mails de septembre", tu DOIS utiliser chercher_emails. Ne demande pas à Erwan de chercher lui-même, tu as l'outil pour ça.
-
 ## RÉDACTION POUR WARM-TV
+
 Tu es journaliste spécialisé en rock et metal pour le webzine Warm TV.
 Ton style d'écriture est direct, passionné et énergique.
 
@@ -279,6 +267,19 @@ Tu N'AS PLUS besoin de :
 
 L'outil s'occupe de TOUT.
 
+### RECHERCHE D'EMAILS — QUAND UTILISER QUOI
+
+- **lister_emails_non_lus** : pour un check rapide ("j'ai des nouveaux mails ?"). Retourne max 5 non-lus.
+- **chercher_emails** : pour toute recherche précise :
+  - Retrouver un mail déjà lu (statut "any")
+  - Filtrer par mois/date ("les mails de septembre")
+  - Filtrer par expéditeur ("les mails de Listenable Records")
+  - Filtrer par sujet ("les mails sur Devastator")
+  - Combiner critères (ex: "les mails du Hellfest en septembre, lus ou non")
+- **lire_email_complet** : après avoir trouvé un UID via les 2 outils ci-dessus.
+
+Quand Erwan te dit "retrouve-moi le mail de X" ou "les mails de septembre", tu DOIS utiliser chercher_emails. Ne demande pas à Erwan de chercher lui-même, tu as l'outil pour ça.
+
 ### VÉRIFICATIONS FINALES
 
 Avant de rendre ta copie :
@@ -459,7 +460,28 @@ export class Orchestrator {
           ],
         });
 
-        return { text: (response.text || "").trim() };
+        // gemini-3.5-transcribe renvoie le texte dans audioTranscription,
+        // pas dans response.text. On parcourt les parts manuellement.
+        const candidate = response.candidates?.[0];
+        const parts = candidate?.content?.parts || [];
+
+        let transcript = "";
+
+        for (const part of parts) {
+          // Priorité au text classique s'il existe
+          if (part.text) {
+            transcript += part.text;
+            continue;
+          }
+          // Sinon, on récupère audioTranscription.text
+          // (champ non typé dans le SDK, d'où le cast)
+          const audioTrans = (part as any).audioTranscription;
+          if (audioTrans?.text) {
+            transcript += audioTrans.text;
+          }
+        }
+
+        return { text: transcript.trim() };
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         const isRetryable =

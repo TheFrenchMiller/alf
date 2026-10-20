@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { speakText } from "../api";
 
 interface UseSpeechOptions {
   lang?: string;
@@ -16,6 +17,8 @@ interface UseSpeechReturn {
   availableVoices: SpeechSynthesisVoice[];
 }
 
+type BackendStatus = "unknown" | "available" | "unavailable";
+
 export function useSpeech(options: UseSpeechOptions = {}): UseSpeechReturn {
   const {
     lang = "fr-FR",
@@ -26,15 +29,22 @@ export function useSpeech(options: UseSpeechOptions = {}): UseSpeechReturn {
   } = options;
 
   const [isSpeaking, setIsSpeaking] = useState(false);
-  const [availableVoices, setAvailableVoices] = useState<SpeechSynthesisVoice[]>([]);
-  const utteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
+  const [availableVoices, setAvailableVoices] = useState<
+    SpeechSynthesisVoice[]
+  >([]);
+  const [backendStatus, setBackendStatus] =
+    useState<BackendStatus>("unknown");
 
-  const isSupported =
+  const utteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const currentUrlRef = useRef<string | null>(null);
+
+  const browserSupported =
     typeof window !== "undefined" && "speechSynthesis" in window;
 
-  // Charge les voix disponibles (elles arrivent parfois en différé)
+  // Charge les voix navigateur (fallback)
   useEffect(() => {
-    if (!isSupported) return;
+    if (!browserSupported) return;
 
     const loadVoices = () => {
       const voices = window.speechSynthesis.getVoices();
@@ -47,19 +57,35 @@ export function useSpeech(options: UseSpeechOptions = {}): UseSpeechReturn {
     return () => {
       window.speechSynthesis.onvoiceschanged = null;
     };
-  }, [isSupported]);
+  }, [browserSupported]);
+
+  // Détecte si Pocket TTS est dispo au premier appel
+  // (on ne teste pas au montage pour ne pas bloquer le démarrage)
 
   const stop = useCallback(() => {
-    if (!isSupported) return;
-    window.speechSynthesis.cancel();
+    // Stoppe Pocket TTS (audio element)
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current.currentTime = 0;
+      audioRef.current = null;
+    }
+    if (currentUrlRef.current) {
+      URL.revokeObjectURL(currentUrlRef.current);
+      currentUrlRef.current = null;
+    }
+
+    // Stoppe la voix navigateur
+    if (browserSupported) {
+      window.speechSynthesis.cancel();
+    }
+
     setIsSpeaking(false);
-  }, [isSupported]);
+  }, [browserSupported]);
 
-  const speak = useCallback(
+  const speakWithBrowser = useCallback(
     (text: string) => {
-      if (!isSupported || !text) return;
+      if (!browserSupported || !text) return;
 
-      // Coupe toute lecture en cours
       window.speechSynthesis.cancel();
 
       const utterance = new SpeechSynthesisUtterance(text);
@@ -68,13 +94,13 @@ export function useSpeech(options: UseSpeechOptions = {}): UseSpeechReturn {
       utterance.pitch = pitch;
       utterance.volume = volume;
 
-      // Choisit une voix
       if (voiceName) {
         const selected = availableVoices.find((v) => v.name === voiceName);
         if (selected) utterance.voice = selected;
       } else {
-        // Sinon, cherche une voix française par défaut
-        const frenchVoice = availableVoices.find((v) => v.lang.startsWith("fr"));
+        const frenchVoice = availableVoices.find((v) =>
+          v.lang.startsWith("fr")
+        );
         if (frenchVoice) utterance.voice = frenchVoice;
       }
 
@@ -85,15 +111,86 @@ export function useSpeech(options: UseSpeechOptions = {}): UseSpeechReturn {
       utteranceRef.current = utterance;
       window.speechSynthesis.speak(utterance);
     },
-    [isSupported, lang, rate, pitch, volume, voiceName, availableVoices]
+    [browserSupported, lang, rate, pitch, volume, voiceName, availableVoices]
   );
 
-  // Nettoyage à la fermeture du composant
+  const speakWithBackend = useCallback(
+    async (text: string) => {
+      const blob = await speakText(text);
+      const url = URL.createObjectURL(blob);
+      currentUrlRef.current = url;
+
+      const audio = new Audio(url);
+      audioRef.current = audio;
+
+      audio.onplay = () => setIsSpeaking(true);
+      audio.onended = () => {
+        setIsSpeaking(false);
+        if (currentUrlRef.current) {
+          URL.revokeObjectURL(currentUrlRef.current);
+          currentUrlRef.current = null;
+        }
+        audioRef.current = null;
+      };
+      audio.onerror = () => {
+        setIsSpeaking(false);
+        if (currentUrlRef.current) {
+          URL.revokeObjectURL(currentUrlRef.current);
+          currentUrlRef.current = null;
+        }
+        audioRef.current = null;
+      };
+
+      await audio.play();
+    },
+    []
+  );
+
+  const speak = useCallback(
+    (text: string) => {
+      if (!text) return;
+
+      // Coupe toute lecture en cours
+      stop();
+
+      // Tente Pocket TTS en priorité (si dispo ou statut inconnu)
+      if (backendStatus !== "unavailable") {
+        speakWithBackend(text)
+          .then(() => {
+            if (backendStatus === "unknown") {
+              setBackendStatus("available");
+            }
+          })
+          .catch((err) => {
+            console.warn(
+              "[Speech] Pocket TTS indisponible, fallback navigateur :",
+              err.message
+            );
+            setBackendStatus("unavailable");
+            speakWithBrowser(text);
+          });
+        return;
+      }
+
+      // Statut déjà "unavailable" → fallback direct
+      speakWithBrowser(text);
+    },
+    [backendStatus, speakWithBackend, speakWithBrowser, stop]
+  );
+
+  // Nettoyage à la fermeture
   useEffect(() => {
     return () => {
-      if (isSupported) window.speechSynthesis.cancel();
+      stop();
+      if (browserSupported) window.speechSynthesis.cancel();
     };
-  }, [isSupported]);
+  }, [browserSupported, stop]);
 
-  return { isSupported, isSpeaking, speak, stop, availableVoices };
+  return {
+    isSupported: true, // toujours true : Pocket TTS OU navigateur
+    isSpeaking,
+    speak,
+    stop,
+    availableVoices,
+  };
 }

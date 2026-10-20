@@ -107,7 +107,10 @@ export async function transcribeAudio(
 
   if (!res.ok) {
     const errorBody = await res.text();
-    return { text: "", error: `Erreur transcription (${res.status}): ${errorBody}` };
+    return {
+      text: "",
+      error: `Erreur transcription (${res.status}): ${errorBody}`,
+    };
   }
 
   return res.json();
@@ -125,8 +128,31 @@ export async function executeAction(
 
   if (!res.ok) {
     const errorBody = await res.text();
-    return { result: "", error: `Erreur exécution (${res.status}): ${errorBody}` };
+    return {
+      result: "",
+      error: `Erreur exécution (${res.status}): ${errorBody}`,
+    };
   }
 
   return res.json();
+}
+
+/**
+ * Synthèse vocale via Pocket TTS (backend).
+ * Retourne un Blob audio (WAV) en cas de succès.
+ * Lève une erreur si le backend renvoie autre chose que 200.
+ */
+export async function speakText(text: string): Promise<Blob> {
+  const res = await fetch(`${API_BASE}/speak`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text }),
+  });
+
+  if (!res.ok) {
+    const errorBody = await res.text();
+    throw new Error(`Erreur speak (${res.status}): ${errorBody}`);
+  }
+
+  return res.blob();
 }

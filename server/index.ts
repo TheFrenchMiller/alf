@@ -2,13 +2,11 @@ import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
 import { resolve } from "path";
+import { spawn, ChildProcess } from "child_process";
 import { McpManager } from "./mcp-manager.js";
 import { Orchestrator } from "./orchestrator.js";
 import type { ChatRequest, ChatResponse, StatusResponse } from "./types.js";
 
-// Résolution du chemin du .env :
-// - En mode dev (npm run server) : ../../mcp-servers/.env relatif à server/
-// - En mode exe compilé : fourni via la variable ALF_ENV_PATH par Tauri
 const envPath =
   process.env.ALF_ENV_PATH || resolve(process.cwd(), "../mcp-servers/.env");
 
@@ -16,6 +14,125 @@ console.log(`[Orchestrateur] Chargement du .env depuis : ${envPath}`);
 dotenv.config({ path: envPath });
 
 const PORT = 3001;
+const POCKET_TTS_PORT = 8000;
+const POCKET_TTS_URL = `http://localhost:${POCKET_TTS_PORT}`;
+const POCKET_TTS_VOICE = process.env.POCKET_TTS_VOICE || "estelle";
+const POCKET_TTS_LANG = process.env.POCKET_TTS_LANG || "french";
+
+let pocketTtsProcess: ChildProcess | null = null;
+let pocketTtsAvailable = false;
+
+/**
+ * Vérifie si le serveur Pocket TTS répond.
+ */
+async function isPocketTtsAlive(): Promise<boolean> {
+  try {
+    const res = await fetch(POCKET_TTS_URL, {
+      signal: AbortSignal.timeout(1500),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Attend que Pocket TTS soit prêt (polling toutes les 500ms, timeout 120s).
+ */
+async function waitForPocketTts(timeoutMs = 120000): Promise<boolean> {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    if (await isPocketTtsAlive()) return true;
+    await new Promise((r) => setTimeout(r, 500));
+  }
+  return false;
+}
+
+/**
+ * Lance le serveur Pocket TTS en sous-processus (si pas déjà en cours).
+ */
+async function startPocketTts(): Promise<void> {
+  // Si un serveur Pocket TTS tourne déjà (autre session), on le réutilise.
+  if (await isPocketTtsAlive()) {
+    console.log("[PocketTTS] Serveur déjà en cours, réutilisation.");
+    pocketTtsAvailable = true;
+    return;
+  }
+
+  console.log(
+    `[PocketTTS] Lancement de "uvx pocket-tts serve --language ${POCKET_TTS_LANG} --voice ${POCKET_TTS_VOICE}"...`
+  );
+
+  try {
+        pocketTtsProcess = spawn(
+      "C:\\Users\\erwan\\.local\\bin\\uvx.exe",
+            [
+        "pocket-tts",
+        "serve",
+        "--language",
+        POCKET_TTS_LANG,
+        "--default-voice",
+        POCKET_TTS_VOICE,
+      ],
+      {
+        stdio: ["ignore", "pipe", "pipe"],
+        shell: true, // nécessaire sous Windows pour trouver uvx dans le PATH
+      }
+    );
+
+    pocketTtsProcess.stdout?.on("data", (data) => {
+      const line = data.toString().trim();
+      if (line) console.log(`[PocketTTS] ${line}`);
+    });
+
+    pocketTtsProcess.stderr?.on("data", (data) => {
+      const line = data.toString().trim();
+      if (line) console.log(`[PocketTTS] ${line}`);
+    });
+
+    pocketTtsProcess.on("error", (err) => {
+      console.error("[PocketTTS] Erreur de lancement :", err.message);
+      pocketTtsAvailable = false;
+    });
+
+    pocketTtsProcess.on("exit", (code) => {
+      console.log(`[PocketTTS] Processus terminé (code ${code}).`);
+      pocketTtsAvailable = false;
+      pocketTtsProcess = null;
+    });
+
+    console.log("[PocketTTS] Attente de disponibilité...");
+    const ready = await waitForPocketTts();
+
+    if (ready) {
+      console.log("[PocketTTS] Prêt.");
+      pocketTtsAvailable = true;
+    } else {
+      console.error(
+        "[PocketTTS] Timeout : le serveur n'a pas répondu dans les temps."
+      );
+      pocketTtsAvailable = false;
+    }
+  } catch (err) {
+    console.error("[PocketTTS] Impossible de lancer le serveur :", err);
+    pocketTtsAvailable = false;
+  }
+}
+
+/**
+ * Arrête proprement Pocket TTS.
+ */
+function stopPocketTts(): void {
+  if (pocketTtsProcess) {
+    console.log("[PocketTTS] Arrêt du serveur...");
+    try {
+      pocketTtsProcess.kill();
+    } catch {
+      // ignore
+    }
+    pocketTtsProcess = null;
+  }
+}
 
 async function main() {
   const apiKey = process.env.GEMINI_API_KEY;
@@ -31,6 +148,11 @@ async function main() {
   await mcp.connectAll();
 
   const orchestrator = new Orchestrator(apiKey, mcp);
+
+  // Lance Pocket TTS en arrière-plan (non bloquant)
+  startPocketTts().catch((err) => {
+    console.error("[PocketTTS] Erreur démarrage :", err);
+  });
 
   const app = express();
   app.use(cors());
@@ -148,6 +270,59 @@ async function main() {
     }
   });
 
+  // --- POST /speak : synthèse vocale via Pocket TTS ---
+  app.post("/speak", async (req, res) => {
+    const { text } = req.body as { text?: string };
+
+    if (!text || typeof text !== "string") {
+      res.status(400).json({ error: "text manquant ou invalide" });
+      return;
+    }
+
+    if (!pocketTtsAvailable) {
+      res.status(503).json({
+        error: "Pocket TTS non disponible",
+        fallback: "browser",
+      });
+      return;
+    }
+
+    try {
+            const form = new FormData();
+      form.append("text", text);
+      form.append("voice_url", POCKET_TTS_VOICE);
+
+      const ttsRes = await fetch(`${POCKET_TTS_URL}/tts`, {
+        method: "POST",
+        body: form,
+        signal: AbortSignal.timeout(60000),
+      });
+
+      if (!ttsRes.ok) {
+        const errText = await ttsRes.text();
+        console.error(`[Speak] Pocket TTS erreur ${ttsRes.status}: ${errText}`);
+        res.status(500).json({
+          error: `Pocket TTS erreur ${ttsRes.status}`,
+          fallback: "browser",
+        });
+        return;
+      }
+
+      const audioBuffer = Buffer.from(await ttsRes.arrayBuffer());
+      const contentType = ttsRes.headers.get("content-type") || "audio/wav";
+
+      res.setHeader("Content-Type", contentType);
+      res.setHeader("Content-Length", audioBuffer.length.toString());
+      res.send(audioBuffer);
+    } catch (error) {
+      console.error("[Speak] Erreur :", error);
+      res.status(500).json({
+        error: error instanceof Error ? error.message : String(error),
+        fallback: "browser",
+      });
+    }
+  });
+
   // --- Démarrage du serveur ---
   const server = app.listen(PORT, () => {
     console.log(`[Orchestrateur] API disponible sur http://localhost:${PORT}`);
@@ -156,12 +331,19 @@ async function main() {
 
   process.on("SIGINT", async () => {
     console.log("\n[Orchestrateur] Arrêt en cours...");
+    stopPocketTts();
     await mcp.shutdown();
     server.close(() => process.exit(0));
+  });
+
+  process.on("SIGTERM", () => {
+    stopPocketTts();
+    process.exit(0);
   });
 }
 
 main().catch((error) => {
   console.error("[Orchestrateur] Erreur fatale :", error);
+  stopPocketTts();
   process.exit(1);
 });
