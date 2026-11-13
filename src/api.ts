@@ -50,6 +50,8 @@ export interface ServerStatus {
 export interface StatusResponse {
   servers: ServerStatus[];
   totalTools: number;
+  hasApiKey?: boolean;
+  demoMode?: boolean;
 }
 
 export interface ToolsResponse {
@@ -62,6 +64,26 @@ export interface ToolsResponse {
 export async function getStatus(): Promise<StatusResponse> {
   const res = await fetch(`${API_BASE}/status`);
   if (!res.ok) throw new Error(`Erreur status: ${res.status}`);
+  return res.json();
+}
+
+export async function setApiKey(apiKey: string): Promise<{ ok: boolean }> {
+  const res = await fetch(`${API_BASE}/api-key`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ apiKey }),
+  });
+  if (!res.ok) throw new Error(`Erreur configuration clé: ${res.status}`);
+  return res.json();
+}
+
+export async function toggleDemoMode(demo?: boolean): Promise<{ demoMode: boolean }> {
+  const res = await fetch(`${API_BASE}/toggle-demo`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ demo }),
+  });
+  if (!res.ok) throw new Error(`Erreur bascule démo: ${res.status}`);
   return res.json();
 }
 
@@ -137,11 +159,6 @@ export async function executeAction(
   return res.json();
 }
 
-/**
- * Synthèse vocale via Pocket TTS (backend).
- * Retourne un Blob audio (WAV) en cas de succès.
- * Lève une erreur si le backend renvoie autre chose que 200.
- */
 export async function speakText(text: string): Promise<Blob> {
   const res = await fetch(`${API_BASE}/speak`, {
     method: "POST",
@@ -150,8 +167,7 @@ export async function speakText(text: string): Promise<Blob> {
   });
 
   if (!res.ok) {
-    const errorBody = await res.text();
-    throw new Error(`Erreur speak (${res.status}): ${errorBody}`);
+    throw new Error(`Erreur speak (${res.status})`);
   }
 
   return res.blob();

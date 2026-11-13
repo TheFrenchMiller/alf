@@ -1,311 +1,285 @@
-markdown
 # Alf 2.0.1 - Notes de projet
 
 Assistant personnel autonome d'Erwan (The French Miller / WARM-TV / Wearerockmetal).
 
-## Démarrage rapide
+## Démarrage
+
+### Mode Application autonome (Production / Quotidien)
+
+Alf est packagé en application Windows autonome via Tauri + NSIS :
+- **Exécutable installé :** `C:\Users\erwan\AppData\Local\Alf\alf-201-hq.exe`
+- **Installateur NSIS :** `alf-2.0.1-hq/src-tauri/target/release/bundle/nsis/Alf_0.1.0_x64-setup.exe`
+
+Au lancement, l'interface démarre automatiquement :
+1. Le sidecar backend (`binaries/alf-backend`) via `src/hooks/useBackend.ts` sur le port `3001`
+2. Les 5 serveurs MCP déclarés dans `server/mcp.config.json`
+3. Le serveur vocal local **Pocket TTS** (`uvx pocket-tts serve`) sur le port `8000`
+
+### Mode Développement
 
 Deux terminaux, dans `alf-2.0.1-hq/` :
 
 **Terminal 1 - Backend (orchestrateur) :**
+```bash
 npm run server
-
-text
+```
 
 **Terminal 2 - Interface :**
+```bash
 npm run tauri dev
+```
 
-text
+### Prérequis système Windows (en cas de réinitialisation PC)
 
-Les deux doivent tourner en parallèle.
+Même en version `.exe`, Alf dépend de deux outils installés sur `C:\` :
+1. **Node.js LTS** (`node` et `npx` dans le `PATH`) — requis par `alf-backend` pour lancer les serveurs MCP (`mcp-*.js` et Brave Search).
+   - Penser à autoriser les scripts PowerShell : `Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned -Force`
+2. **`uv` / `uvx`** — requis par `server/index.ts` au chemin exact `C:\Users\erwan\.local\bin\uvx.exe` pour faire tourner **Pocket TTS**.
+   - Commande d'installation : `winget install --id astral-sh.uv -e` (et vérifier que `uv.exe` / `uvx.exe` sont bien présents dans `C:\Users\erwan\.local\bin\`).
 
-**Lancement rapide :** un fichier `Alf.bat` sur le bureau lance les deux automatiquement.
+## Modèles Gemini & Synthèse Vocale
 
-## Modèle Gemini
+### Modèles Gemini utilisés
 
-**Modèle actuel :** `gemini-3.1-flash-lite` (dans `server/orchestrator.ts` et `mcp-servers/mcp-dev.js`)
+- **Modèle principal (Chat, Vision, Extraction) :** `gemini-3.8-flash`
+  - Utilisé dans `server/orchestrator.ts`, `mcp-servers/mcp-email.js`, `mcp-servers/mcp-wordpress.js` et `mcp-servers/mcp-dev.js`
+- **Modèle de transcription audio (Micro) :** `gemini-3.5-transcribe`
+  - Utilisé dans `server/orchestrator.ts` (`transcribe()`), avec lecture de `audioTranscription.text` et 3 tentatives automatiques en cas d'erreur `503 UNAVAILABLE`
 
-**Latence mesurée :** ~2 secondes
-
-**Modèles à éviter :**
-- `gemini-3.5-flash-lite` : 111 secondes (saturé chez Google)
+**Modèles historiques à éviter :**
+- `gemini-3.5-flash-lite` : saturé (latence > 100s)
 - `gemini-3.6-flash` : 503 UNAVAILABLE
-- `gemini-2.5-flash-lite` et `gemini-2.5-flash` : plus disponibles
+- `gemini-2.5-flash-lite` et `gemini-2.5-flash` : retirés
 
 **Tester un modèle :**
+```bash
 node test-gemini.js
+```
 
-text
+### Synthèse vocale (Pocket TTS + Fallback navigateur)
 
-### Token Instagram
+- **Moteur principal :** **Pocket TTS** lancé en sous-processus par `server/index.ts` :
+  ```bash
+  C:\Users\erwan\.local\bin\uvx.exe pocket-tts serve --language french --default-voice estelle
+  ```
+  Écoute sur `http://localhost:8000` (configurable via `POCKET_TTS_VOICE` et `POCKET_TTS_LANG` dans `.env`).
+- **Route backend :** `POST /speak` (convertit le texte en audio WAV via Pocket TTS).
+- **Fallback automatique :** dans `src/hooks/useSpeech.ts`, si Pocket TTS n'est pas disponible (503 ou erreur réseau), Alf bascule automatiquement sur la synthèse vocale du navigateur (`window.speechSynthesis`).
 
-Un token permanent (utilisateur système Meta) est stocké dans `mcp-servers/.env` sous `INSTAGRAM_TOKEN`.
+### Fichier `.env` centralisé
 
-**Pour le régénérer :** business.facebook.com → Paramètres → Utilisateurs système → ton utilisateur → Générer un nouveau token → Jamais d'expiration.
-
-### Clé Gemini API
-
-`GEMINI_API_KEY` doit être présente dans **deux** `.env` :
-- `alf-2.0.1-hq/server/.env` — pour l'orchestrateur
-- `mcp-servers/.env` — pour `mcp-dev.js` (analyser_image, lire_pdf)
+Toutes les clés API et identifiants sont centralisés dans **`mcp-servers/.env`** (chargé automatiquement par `server/index.ts` via `ALF_ENV_PATH` ou `../mcp-servers/.env`, ainsi que par chaque serveur MCP) :
+- `GEMINI_API_KEY` — clé API Google Gemini
+- `BRAVE_API_KEY` — clé API Brave Search
+- `INSTAGRAM_TOKEN`, `INSTAGRAM_ACCOUNT_FRENCHMILLER`, `INSTAGRAM_ACCOUNT_WARMTV` — token permanent (utilisateur système Meta) et IDs des comptes
+- `EMAIL_USER*`, `EMAIL_PASSWORD*`, `EMAIL_HOST*`, `SMTP_HOST*` — identifiants IMAP/SMTP des 3 boîtes mail
+- `WP_URL`, `WP_USER`, `WP_APP_PASSWORD` — accès API REST WordPress (`https://wearerockmetal.com`)
+- `DEV_ROOT_PATH` — racine autorisée pour les outils fichiers (`D:/Documents/2026 - Web`)
 
 ## Serveurs MCP connectés
 
-**5 serveurs, 20 outils au total.**
+**5 serveurs, 23 outils au total** (timeout d'appel MCP fixé à **10 minutes** dans `mcp-manager.ts` pour supporter les traitements lourds d'images).
 
-### `email` (mcp-email.js) — 3 outils
+### 1. `email` (`mcp-email.js` v6.1.0) — 4 outils
 
-- `lister_emails_non_lus` — liste les mails non lus d'un compte
-- `lire_email_complet` — lit le contenu complet d'un mail via son UID. Extrait automatiquement les pièces jointes dans `2026.09_DATA_WARM_TV/sources-warmtv/emails/AAAA-MM-JJ-expediteur-sujet/`
-- `envoyer_email` — envoie un mail (validation obligatoire)
+- `lister_emails_non_lus` — check rapide des derniers mails non lus (max 5) d'un compte
+- `chercher_emails` — recherche IMAP multicritères :
+  - `lu` (`"true"`, `"false"`, `"any"`)
+  - `date_debut` / `date_fin` (`YYYY-MM-DD`, date de fin inclusive grâce à l'ajout automatique d'un jour sur la clause IMAP `BEFORE`)
+  - `expediteur` (`FROM`), `sujet` (`SUBJECT`), `limit` (défaut 20, max 50)
+- `lire_email_complet` — lit un mail via son UID sans le marquer comme lu (`markSeen: false`) et réalise un pipeline complet dans `2026.09_DATA_WARM_TV/sources-warmtv/emails/AAAA-MM-JJ-expediteur-sujet/` :
+  1. Extraction des pièces jointes
+  2. Téléchargement des images CDN présentes dans le HTML (avec filtrage `URL_BLACKLIST` : icônes réseaux sociaux, pixels de tracking, spacers, signatures)
+  3. Déduplication automatique des fichiers par empreinte **MD5**
+  4. Extraction structurée via Gemini (`gemini-3.8-flash`) enregistrée dans **`metadata.json`** (`groupe`, `label`, `photographe`, `date_sortie`, `type_evenement`, `contact_presse`, `resume`)
+- `envoyer_email` — envoie un mail via SMTP (validation manuelle obligatoire)
 
 **3 comptes gérés :**
 - `thefrenchmiller` (Hostinger)
 - `wearerockmetal` (Hostinger)
 - `yahoo`
 
-### `instagram` (mcp-instagram.js) — 3 outils
+### 2. `wordpress` (`mcp-wordpress.js` v1.7.0) — 8 outils
 
-- `instagram_get_profile` — profil du compte (followers, bio, posts)
-- `instagram_get_recent_posts` — derniers posts avec likes/commentaires
-- `instagram_get_insights` — statistiques (reach, vues de profil, engagement)
+- `wp_lister_articles` — liste les articles (filtrable par statut : `publish`, `draft`, `pending`, `any`)
+- `wp_lire_article` — lit le contenu complet d'un article via son ID
+- `wp_chercher_articles` — recherche par mot-clé
+- `wp_lister_categories` — liste les catégories du site avec leur ID
+- `wp_uploader_media` — uploade un fichier image local vers la médiathèque WordPress avec `titre` et `alt_text` (validation obligatoire)
+- `preparer_article_avec_images` — **workflow complet automatisé de création d'article à partir d'un dossier de sources** (validation obligatoire) :
+  1. Lit `metadata.json` dans `dossier_sources` (récupère `groupe`, `photographe`, `resume`)
+  2. Ignore les fichiers `< 500 octets` et classifie chaque image via Gemini Vision (`ALBUM_COVER`, `PHOTO_PROMO`, `PROMO_BANNER`, `TOUR_POSTER`, `MERCH_MOCKUP`, `BAND_LOGO`, `LABEL_LOGO`, `PLATFORM_LOGO`, `VIDEO_THUMBNAIL`, `NOISE`)
+  3. Filtre uniquement les visuels éditoriaux utiles (`ALBUM_COVER`, `PHOTO_PROMO`, `PROMO_BANNER`, `TOUR_POSTER`, `MERCH_MOCKUP`)
+  4. Renomme les fichiers selon la convention SEO (ex. `groupe-album-cover.jpg`, `groupe-promo-photographe-1.jpg`)
+  5. Uploade les images sur WordPress avec `title` et `alt_text`
+  6. Définit automatiquement `ALBUM_COVER` comme image à la une (`featured_media`)
+  7. Insère les balises `<img>` des autres visuels dans le contenu (`debut`, `fin` ou `aucune`)
+  8. Crée le brouillon WordPress (`status: "draft"`) avec catégories, extrait et métadonnées Yoast SEO
+- `wp_creer_brouillon` — crée un brouillon simple avec `featured_media_id` optionnel et métadonnées Yoast SEO (validation obligatoire)
+- `wp_modifier_article` — modifie un article existant avec suivi avant/après `_avant_titre`, `_avant_contenu`, `_avant_extrait` (validation obligatoire)
+- `wp_definir_yoast` — définit/modifie les métadonnées Yoast SEO d'un article existant par ID (validation obligatoire)
 
-**2 comptes gérés :**
-- `thefrenchmiller` — compte Instagram pro
-- `warmtv` — compte Instagram WARM-TV
+**Yoast SEO — champs gérés via l'API REST WP (`body.meta`) :**
 
-### `dev` (mcp-dev.js) — 6 outils
+| Arg MCP | Meta WordPress | Label Yoast | Règle stricte |
+|---|---|---|---|
+| `mot_cle_focus` | `_yoast_wpseo_focuskw` | Expression clé principale | **≤ 4 mots** |
+| `titre_seo` | `_yoast_wpseo_title` | Titre SEO | **≤ 60 caractères** |
+| `meta_description` | `_yoast_wpseo_metadesc` | Méta description | **≤ 150 caractères** (cible 140-150) |
+
+### 3. `instagram` (`mcp-instagram.js`) — 3 outils
+
+- `instagram_get_profile` — profil du compte (followers, abonnements, posts, bio)
+- `instagram_get_recent_posts` — derniers posts avec likes, commentaires et dates
+- `instagram_get_insights` — statistiques (reach, vues de profil, comptes engagés, interactions totales)
+
+**2 comptes gérés :** `thefrenchmiller` et `warmtv`
+
+### 4. `dev` (`mcp-dev.js`) — 6 outils
 
 - `lister_dossier` — liste les fichiers et sous-dossiers d'un chemin
-- `lister_recursif` — idem mais explore toute l'arborescence (profondeur max configurable)
-- `lire_fichier` — lit le contenu d'un fichier de code (limite 200 Ko)
+- `lister_recursif` — explore toute l'arborescence (profondeur max configurable, défaut 5)
+- `lire_fichier` — lit le contenu d'un fichier texte (limite 200 Ko)
 - `ecrire_fichier` — crée ou écrase un fichier
-- `analyser_image` — analyse une image via Gemini Vision (photos de concert, pochettes, affiches)
-- `lire_pdf` — extrait le texte d'un PDF via Gemini (communiqués de presse, dossiers)
+- `analyser_image` — analyse une image via Gemini Vision (`gemini-3.8-flash`)
+- `lire_pdf` — extrait le texte d'un PDF via Gemini (`gemini-3.8-flash`)
 
-**Sécurité :** Alf ne peut accéder qu'aux fichiers **sous** la racine définie par `DEV_ROOT_PATH` dans `.env`. Par défaut : `D:/Documents/2026 - Web`.
+**Sécurité :** accès restreint à `DEV_ROOT_PATH` (`D:/Documents/2026 - Web`).
 
-### `websearch` (Brave Search) — 2 outils
+### 5. `websearch` (Brave Search) — 2 outils
 
 - `brave_web_search` — recherche web
 - `brave_local_search` — recherche locale
-
-**Configuration :**
-- Clé API dans `mcp-servers/.env` sous `BRAVE_API_KEY`
-- Serveur MCP officiel : `@modelcontextprotocol/server-brave-search`
-- Domaine : `recherche`
-- Utiliser `${BRAVE_API_KEY}` dans `mcp.config.json` (substitution par `substituteEnvVars()` dans `mcp-manager.ts`)
-- Obtenir une clé : https://brave.com/search/api/
-
-### `wordpress` (mcp-wordpress.js) — 7 outils
-
-- `wp_lister_articles` — liste les articles (filtrable par statut)
-- `wp_lire_article` — lit le contenu complet d'un article via son ID
-- `wp_chercher_articles` — recherche par mot-clé
-- `wp_creer_brouillon` — crée un brouillon (validation obligatoire). Accepte des métadonnées Yoast optionnelles
-- `wp_modifier_article` — modifie un article existant (validation obligatoire)
-- `wp_definir_yoast` — définit/modifie les métadonnées Yoast SEO d'un article (validation obligatoire)
-- `wp_lister_categories` — liste les catégories du site
-
-**Configuration :**
-- Variables dans `mcp-servers/.env` : `WP_URL`, `WP_USER`, `WP_APP_PASSWORD`
-- Le mot de passe est un **Application Password** WordPress (généré dans `/wp-admin` → Utilisateurs → Profil)
-- **Prérequis Hostinger** : ajouter `SetEnvIf Authorization "(.*)" HTTP_AUTHORIZATION=$1` dans le `.htaccess` à la racine du site
-- Site : `https://wearerockmetal.com`
-
-**Sécurité :**
-- Les brouillons sont créés avec `status: "draft"` — jamais publiés directement
-- Validation manuelle obligatoire pour `wp_creer_brouillon`, `wp_modifier_article` et `wp_definir_yoast`
-
-### Yoast SEO — intégration
-
-**Les métadonnées Yoast sont accessibles en écriture via l'API REST WP** (pas de snippet PHP nécessaire). Testé et validé sur Hostinger.
-
-**Champs gérés :**
-
-| Arg MCP | Meta WordPress | Label Yoast | Longueur cible |
-|---|---|---|---|
-| `mot_cle_focus` | `_yoast_wpseo_focuskw` | Expression clé principale | 1-4 mots |
-| `titre_seo` | `_yoast_wpseo_title` | Titre SEO | 55-60 car. |
-| `meta_description` | `_yoast_wpseo_metadesc` | Méta description | 140-155 car. |
-
-**Utilisation :** ces 3 champs sont acceptés en args optionnels de `wp_creer_brouillon`, et modifiables via `wp_definir_yoast` (par ID).
-
-**En lecture :** `yoast_head_json` expose le titre, la description, le canonical, les Twitter Cards et le Schema.org d'un article.
 
 ## Prompt éditorial WARM-TV
 
 Alf écrit avec le ton WARM-TV : direct, passionné, énergique.
 
-**Boîte à outils** (10 règles) :
+**Boîte à outils (10 règles — à doser selon le format, ne jamais tout utiliser d'un coup) :**
 1. Autodérision
 2. Brise le 4e mur
 3. Mots-valises et néologismes
 4. Titres de morceaux tissés dans la narration
 5. Calembours téléphonés
 6. Métaphores physiques et viscérales
-7. Références Pop & Geek désinvoltes
-8. Fuies le bullshit
+7. Références Pop & Geek désinvoltes (1 à 2 max par article)
+8. Fuis le bullshit
 9. Incises et parenthèses
-10. Conclusion passionnée
+10. Conclusion passionnée (en variant les formules de clôture d'un article à l'autre)
 
-**Principe fondamental** : ce sont des OUTILS, pas une CHECKLIST. Ne jamais tous les appliquer dans un même article. Piocher selon le type de contenu.
+**Dosage par type & longueurs cibles :**
+- **News** (200-300 mots, pas de `<h2>`) : outils 1, 2, 5, 8
+- **Chronique d'album** (400-600 mots, 2 à 3 `<h2>`) : outils 1, 4, 5, 6, 10
+- **Interview** (600-900 mots, 3 à 5 `<h2>`) : outils 1, 3, 7, 8
+- **Live report — Concert unique** (500-800 mots, 3 à 4 `<h2>`) : outils 2, 6, 7, 9, 10
+- **Live report — Festival 1 jour** (1200-1800 mots, 5 à 8 `<h2>`)
+- **Live report — Festival multi-jours** : un article par journée
+- **Dossier thématique** (1500-2500 mots, 6 à 10 `<h2>`)
 
-**Dosage par type :**
-- Chronique d'album : 1, 4, 5, 6, 10
-- News : 1, 2, 5, 8
-- Live report : 2, 6, 7, 9, 10
-- Interview : 1, 3, 7, 8
+**Règles dures du prompt (`server/orchestrator.ts`) :**
+- **Interdiction d'ouverture par cliché** (liste noire stricte) → ouvrir par un détail concret (date, chiffre, lieu, image visuelle, question).
+- **Balises mécaniques** : `<strong>` sur TOUS les noms de groupes/artistes à CHAQUE occurrence, `<em>` sur TOUS les titres d'albums/morceaux à CHAQUE occurrence.
+- **Anti-hallucination** : ne jamais inventer le nombre de membres d'un groupe ni les détails d'un événement réel ; ne jamais modifier ou inventer un chemin de fichier (`2026.09_DATA_WARM_TV/sources-warmtv/emails/`).
+- **Format HTML WordPress** : pas de titre dans le corps, commence toujours par `<p>`, pas de `<img>` manuel lors de l'utilisation de `preparer_article_avec_images`.
 
-**Format WordPress** : HTML avec `<p>`, `<h2>`, `<strong>` (groupes), `<em>` (albums).
-**Longueurs cibles** : 400-600 mots (chronique), 200-300 (news), 600-900 (live report).
-
-**Règles dures ajoutées :**
-- **Interdiction d'ouverture par cliché** — liste noire de formules ("ne sont pas là pour enfiler des perles", "ça va faire mal", etc.)
-- **Balises mécaniques** : `<strong>` sur TOUS les noms de groupes à CHAQUE occurrence, `<em>` sur TOUS les titres d'albums à CHAQUE occurrence. Test de vérification obligatoire.
-- **Vérifications finales** : 4 points à checker avant de rendre (balises groupes, balises albums, phrases ≤ 25 mots, adresse au lecteur pour les news)
-
-**À éviter** : appliquer les 10 outils partout, forcer un calembour, mettre trop de références Pop/Geek, répéter les mêmes expressions, ouvrir par un cliché.
-
-**Personas multiples** : prévu dans une version future.
-
-## Ajouter un serveur MCP
-
-1. Créer le script dans `mcp-servers/mcp-xxx.js`
-2. Ajouter une entrée dans `server/mcp.config.json`
-3. Relancer `npm run server`
-
-**Pour les secrets :** utiliser `${VAR_NAME}` dans `mcp.config.json` et ajouter `VAR_NAME=...` dans `mcp-servers/.env`.
-
-## Pièges connus
-
-- `.env` avec caractères spéciaux : utiliser des guillemets simples
-- `dotenv.config()` : toujours préciser le chemin absolu
-- Modèle Gemini lent : tester avec `node test-gemini.js` avant de changer
-- IMAP AUTHENTICATIONFAILED : vérifier le mot de passe de la boîte mail, pas celui de l'hébergeur
-- Gemini formate en Markdown par défaut → ajouter une règle "FORMAT DE RÉPONSE OBLIGATOIRE" dans le SYSTEM_INSTRUCTION d'orchestrator.ts
-- `useSpeech` lit les symboles Markdown → utiliser `cleanForSpeech()` dans App.tsx avant d'appeler speak()
-- System prompt vs interception : le prompt doit dire à l'agent QUAND appeler l'outil, le code gère CE QUI SE PASSE après. Ne pas dupliquer la logique de validation dans les deux.
-- Cargo "not found" : fermer VS Code complètement, ou redémarrer Windows. Bug de PATH intermittent.
-- **Hostinger WordPress** : le header `Authorization` est filtré par défaut. Ajouter la règle `SetEnvIf` dans le `.htaccess` pour que l'API REST accepte les Application Passwords.
-- **Gemini "lite" n'applique pas les règles mécaniques du premier coup** : forcer avec des formulations "MÉCANIQUE, pas sémantique", "à CHAQUE occurrence", et un "TEST DE VÉRIFICATION AVANT DE RENDRE TA COPIE". Le modèle a tendance à n'appliquer la règle qu'à la première occurrence.
-- **Yoast SEO** : pas besoin de `register_meta` explicite. Les meta `_yoast_wpseo_title`, `_yoast_wpseo_metadesc`, `_yoast_wpseo_focuskw` sont déjà exposés en écriture via l'API REST. Il suffit de les passer dans `body.meta` lors d'un POST/PUT.
-- **URLs longues dans les emails** : `break-words` ne suffit pas. Utiliser `[overflow-wrap:anywhere]` en Tailwind arbitrary value.
-- **Compteurs Yoast dans le renderer** : couleur rouge uniquement en cas de dépassement, gris neutre sinon (choix "Option A" — éviter le bruit visuel).
-
-## API HTTP
+## API HTTP (`server/index.ts`)
 
 **Base :** `http://localhost:3001`
 
-- `GET /status` — état des serveurs MCP
-- `GET /tools` — liste des outils
-- `POST /chat` — envoyer un message
+- `GET /status` — état des serveurs MCP et nombre total d'outils
+- `GET /tools` — liste des outils (globale et par domaine)
+- `POST /chat` — envoyer un message à l'orchestrateur
 - `POST /reset` — réinitialiser une conversation
-- `POST /transcribe` — transcrire un audio via Gemini
+- `POST /transcribe` — transcrire un audio via `gemini-3.5-transcribe`
 - `POST /execute-action` — exécuter une action validée manuellement
+- `POST /speak` — synthèse vocale via Pocket TTS (renvoie un flux `audio/wav` ou `503` pour fallback navigateur)
 
 ## Système de validation manuelle
 
-Certains outils ne s'exécutent JAMAIS automatiquement. Ils sont créés en "PendingAction" et attendent une validation de l'utilisateur dans l'interface.
+Les outils sensibles listés dans `TOOLS_REQUIRING_VALIDATION` (`server/orchestrator.ts`) sont interceptés avant exécution et renvoyés dans `pendingActions` (la boucle d'appel d'outils s'arrête immédiatement avec `break` pour éviter que Gemini ne rappelle l'outil en doublon) :
 
-**Outils concernés** (dans `orchestrator.ts` → `TOOLS_REQUIRING_VALIDATION`) :
-- `envoyer_email` — affichage via EmailSendRenderer avec bouton ✅ Envoyer
-- `wp_creer_brouillon` — affichage via WordPressDraftRenderer avec aperçu HTML, compteur de mots et bloc Yoast
-- `wp_modifier_article` — affichage JSON brut pour l'instant
-- `wp_definir_yoast` — fallback amber pour l'instant
+- `envoyer_email` → `EmailSendRenderer.tsx`
+- `preparer_article_avec_images` → `PrepareArticleRenderer.tsx` (aperçu complet, compteurs Yoast, verrouillage du bouton au clic, lien admin WP après création)
+- `wp_creer_brouillon` → `WordPressDraftRenderer.tsx`
+- `wp_modifier_article` → `WordPressModifyRenderer.tsx` (comparaison avant/après)
+- `wp_definir_yoast` → `WordPressYoastRenderer.tsx`
+- `wp_uploader_media` → fallback de validation dans `ActionDispatcher.tsx`
 
-**Flux :**
-1. Gemini appelle l'outil → intercepté par `chat()`
-2. Création d'une PendingAction (id, toolName, args, createdAt)
-3. Renvoyée dans ChatResponse.pendingActions
-4. Affichée dans le panneau d'actions avec bouton ✅
-5. Clic → POST /execute-action → `executePendingAction()` → MCP → exécution réelle
+## Architecture
 
-**Pour ajouter un outil à validation :**
-1. L'ajouter dans `TOOLS_REQUIRING_VALIDATION` (server/orchestrator.ts)
-2. Créer un renderer dédié si besoin (src/components/actions/)
-3. Ajouter un case dans `ActionDispatcher.tsx`
+```text
+alf-2.0.1-hq/
+├── server/                        # Backend orchestrateur (TypeScript)
+│   ├── types.ts                   # Types partagés
+│   ├── mcp.config.json            # Manifeste des 5 serveurs MCP
+│   ├── mcp-manager.ts             # Gestion des connexions MCP (support sidecar + dev)
+│   ├── orchestrator.ts            # Logique Gemini (gemini-3.8-flash) + prompt système
+│   └── index.ts                   # Serveur Express (port 3001) + Pocket TTS (port 8000)
+├── src/                           # Frontend React
+│   ├── api.ts                     # Client HTTP vers localhost:3001
+│   ├── types.ts                   # Types frontend
+│   ├── App.tsx                    # Assemblage principal + cleanForSpeech()
+│   ├── hooks/
+│   │   ├── useBackend.ts          # Lancement du sidecar binaries/alf-backend + polling /status
+│   │   ├── useSpeech.ts           # Synthèse vocale (Pocket TTS en priorité, fallback navigateur)
+│   │   └── useAudioRecorder.ts    # Enregistrement micro
+│   └── components/
+│       ├── Avatar.tsx             # Avatar animé (4 états)
+│       ├── Sidebar.tsx            # Colonne gauche (domaines + serveurs)
+│       ├── ChatPanel.tsx          # Colonne centre (chat)
+│       ├── ActionPanel.tsx        # Colonne droite (actions & validations)
+│       └── actions/               # Renderers d'actions
+│           ├── ActionDispatcher.tsx
+│           ├── DefaultRenderer.tsx
+│           ├── EmailListRenderer.tsx
+│           ├── EmailReadRenderer.tsx
+│           ├── EmailSendRenderer.tsx
+│           ├── PrepareArticleRenderer.tsx
+│           ├── WordPressDraftRenderer.tsx
+│           ├── WordPressModifyRenderer.tsx
+│           └── WordPressYoastRenderer.tsx
+└── src-tauri/                     # Coquille Tauri v2 (Rust)
+    ├── binaries/                  # Sidecar compilé (alf-backend)
+    └── target/release/bundle/nsis/Alf_0.1.0_x64-setup.exe
+
+mcp-servers/                       # Serveurs MCP (dossier parent)
+├── mcp-email.js                   # IMAP/SMTP + téléchargement images CDN + dédup MD5 + metadata.json
+├── mcp-wordpress.js               # API REST WP + Yoast SEO + preparer_article_avec_images (Vision)
+├── mcp-dev.js                     # Exploration fichiers + Gemini Vision & PDF
+├── mcp-instagram.js               # Graph API Instagram
+└── .env                           # Configuration et secrets centralisés
+```
 
 ## Prochaines étapes
 
-- [x] Ajouter la voix (window.speechSynthesis)
-- [x] Ajouter le serveur MCP dev (mcp-dev.js)
+- [x] Ajouter la voix (`window.speechSynthesis` puis **Pocket TTS** avec voix française `estelle`)
+- [x] Ajouter le serveur MCP dev (`mcp-dev.js`)
 - [x] Recherche web (Brave Search)
 - [x] Renderers d'actions riches (validation email)
-- [x] Serveur MCP WordPress
-- [x] Renderer pour wp_creer_brouillon (aperçu propre du brouillon)
-- [x] Intégration Yoast SEO (expression clé, titre SEO, méta description)
-- [x] Renderer pour wp_definir_yoast (aperçu des modifs SEO)
-- [x] Renderer pour wp_modifier_article (avant/après)
-- [ ] Workflow éditorial (suggestion de sujets, préparation d'itw)
-- [ ] Renderers Instagram
-- [ ] Renderers Dev
+- [x] Serveur MCP WordPress + intégration Yoast SEO
+- [x] Renderers pour `wp_creer_brouillon`, `wp_definir_yoast` et `wp_modifier_article`
+- [x] Recherche avancée d'emails (`chercher_emails`) + extraction automatique `metadata.json` et déduplication d'images
+- [x] Workflow complet `preparer_article_avec_images` (classification Gemini Vision, renommage SEO, upload WP, mise à la une) + `PrepareArticleRenderer`
+- [x] Packaging Tauri autonome avec sidecar (`Alf_0.1.0_x64-setup.exe` + `useBackend.ts`)
+- [ ] Workflow éditorial (suggestion proactive de sujets, préparation d'interviews)
+- [ ] Renderers dédiés Instagram et Dev
+- [ ] Personas multiples pour varier les plumes sur WARM-TV
 - [ ] App Review Meta pour la publication Instagram
-- [ ] Vrai packaging Tauri (un seul .exe)
 
 ## Changelog
 
+### Session du 10/11/2026
+- Réinstallation de l'environnement système suite à la réinitialisation de Windows 11 (`Node.js LTS`, `uv` / `uvx` dans `.local\bin` pour Pocket TTS, politique PowerShell `RemoteSigned`, réinstallation de `Alf_0.1.0_x64-setup.exe`).
+- Mise à jour complète de `NOTES.md` pour refléter toutes les évolutions réalisées entre fin septembre et octobre 2026.
+
+### Sessions du 27/09/2026 au 20/10/2026
+- **Packaging Tauri & Sidecar** : intégration de `alf-backend` en sidecar Tauri (`useBackend.ts`), résolution dynamique des chemins MCP (`ALF_ENV_PATH`, `ALF_MCP_CONFIG_PATH`, `MCP_SERVERS_DIR`) et génération de l'installateur NSIS `Alf_0.1.0_x64-setup.exe`.
+- **Synthèse vocale Pocket TTS** : lancement automatique de `uvx pocket-tts serve` par le backend (`server/index.ts`), endpoint `POST /speak` et hook `useSpeech.ts` avec fallback navigateur.
+- **Modèles Gemini** : passage à `gemini-3.8-flash` (orchestrateur + serveurs MCP) et `gemini-3.5-transcribe` pour la dictée vocale avec retry automatique.
+- **Workflow `preparer_article_avec_images`** : classification automatique des images par Gemini Vision, renommage SEO avec crédit photographe, upload média WordPress, définition automatique de la pochette en image à la une et composant `PrepareArticleRenderer.tsx`.
+- **Email MCP v6.1.0** : ajout de `chercher_emails` (filtres IMAP par statut, dates, expéditeur, sujet), téléchargement des images CDN, déduplication MD5 et génération automatique de `metadata.json` via Gemini.
+- **Renderers WordPress** : ajout de `WordPressModifyRenderer.tsx` et `WordPressYoastRenderer.tsx`.
+
 ### Session du 24/09/2026
-
-**Ajouts :**
-- Intégration complète Yoast SEO (création + modification)
-- Nouvel outil MCP `wp_definir_yoast`
-- Renderer WordPressDraftRenderer enrichi (HTML interprété, compteur de mots, bloc Yoast avec compteurs et alertes)
-
-**Corrections :**
-- URLs longues dans EmailReadRenderer (`[overflow-wrap:anywhere]`)
-- Prompt éditorial : interdiction d'ouverture par cliché
-- Prompt éditorial : règle mécanique sur les balises `<strong>` / `<em>` (le modèle n'appliquait la règle qu'à la première occurrence)
-
-**Découvertes :**
-- `analyser_image` et `lire_pdf` existent bien, dans `mcp-dev.js` (le markdown.txt initial était incomplet)
-- Yoast est accessible en écriture via l'API REST sans `register_meta`
-- `mcp-dev.js` expose 6 outils (pas 3)
-- Brave Search expose 2 outils (pas 1)
-
-## Futurs MCP envisagés
-
-- **photos** : tri, dédoublonnage, renommage (racine : `D:/Photos`)
-- **archives** : compression, sauvegardes (racine : `E:/Sauvegardes`)
-- **docs** : classement, OCR, conversion (racine : `D:/Documents/Perso`)
-
-## Architecture
-alf-2.0.1-hq/
-├── server/ # Backend orchestrateur (TypeScript)
-│ ├── types.ts # Types partagés
-│ ├── mcp.config.json # Manifeste des serveurs MCP
-│ ├── mcp-manager.ts # Gestion des connexions MCP
-│ ├── orchestrator.ts # Logique Gemini + boucle d'outils
-│ └── index.ts # Serveur Express (port 3001)
-├── src/ # Frontend React
-│ ├── api.ts # Client API vers l'orchestrateur
-│ ├── types.ts # Types locaux
-│ ├── App.tsx # Assemblage principal
-│ ├── hooks/
-│ │ ├── useSpeech.ts # Synthèse vocale (sortie)
-│ │ └── useAudioRecorder.ts # Enregistrement micro (entrée)
-│ └── components/
-│ ├── Avatar.tsx # Avatar animé (4 états)
-│ ├── Sidebar.tsx # Colonne gauche (domaines + serveurs)
-│ ├── ChatPanel.tsx # Colonne centre (chat)
-│ ├── ActionPanel.tsx # Colonne droite (actions effectuées)
-│ └── actions/ # Renderers d'actions
-│ ├── ActionDispatcher.tsx
-│ ├── DefaultRenderer.tsx
-│ ├── EmailListRenderer.tsx
-│ ├── EmailReadRenderer.tsx
-│ ├── EmailSendRenderer.tsx
-│ └── WordPressDraftRenderer.tsx
-└── src-tauri/ # Coquille Tauri (Rust)
-
-mcp-servers/ # (hors alf-2.0.1-hq, au-dessus)
-├── mcp-email.js
-├── mcp-instagram.js
-├── mcp-dev.js
-├── mcp-wordpress.js
-└── .env
-
-text
-
-Projet développé pour Erwan (The French Miller / WARM-TV / Wearerockmetal).
-Démarrage : septembre 2026.
+- Intégration Yoast SEO (`wp_definir_yoast`, `WordPressDraftRenderer`).
+- Corrections `EmailReadRenderer` et durcissement du prompt éditorial (liste noire de clichés d'ouverture, balises mécaniques `<strong>` / `<em>`).

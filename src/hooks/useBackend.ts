@@ -11,6 +11,14 @@ const MCP_SERVERS_DIR =
   "D:\\Documents\\2026 - Web\\2026.09_DEV_GEMINI\\mcp-servers";
 const DEV_ROOT_PATH = "D:\\Documents\\2026 - Web";
 
+function isTauriEnvironment(): boolean {
+  return (
+    typeof window !== "undefined" &&
+    "__TAURI_INTERNALS__" in window &&
+    Boolean((window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__)
+  );
+}
+
 export function useBackend() {
   const [status, setStatus] = useState<BackendStatus>("starting");
   const [error, setError] = useState<string | null>(null);
@@ -24,8 +32,28 @@ export function useBackend() {
     let mounted = true;
 
     async function start() {
+      // 1. Si nous sommes dans un navigateur classique (npm run dev)
+      if (!isTauriEnvironment()) {
+        console.log("[Backend] Mode navigateur détecté (hors runtime Tauri). Vérification du serveur...");
+        const ready = await waitForBackend(5000);
+        if (mounted) {
+          if (ready) {
+            console.log("[Backend] Serveur local détecté et prêt.");
+            setStatus("ready");
+          } else {
+            console.warn("[Backend] Serveur non joignable sur http://localhost:3001.");
+            setStatus("error");
+            setError(
+              "En mode navigateur, le backend doit être lancé séparément : lance 'npm run server' dans un second terminal, ou lance l'application complète avec 'npm run tauri dev'."
+            );
+          }
+        }
+        return;
+      }
+
+      // 2. Si nous sommes dans le runtime Tauri natif (app installée ou npm run tauri dev)
       try {
-        console.log("[Backend] Lancement du sidecar...");
+        console.log("[Backend] Runtime Tauri détecté. Lancement du sidecar...");
         const command = Command.sidecar("binaries/alf-backend", [], {
           env: {
             ALF_ENV_PATH: ENV_PATH,
@@ -55,6 +83,7 @@ export function useBackend() {
         command.on("close", (data) => {
           console.warn(`[Backend] Processus terminé (code ${data.code})`);
         });
+
         command.on("error", (err) => {
           console.error("[Backend] Erreur processus:", err);
           if (mounted) {
@@ -79,9 +108,15 @@ export function useBackend() {
         }
       } catch (err) {
         console.error("[Backend] Impossible de lancer le sidecar:", err);
+        // Si le sidecar échoue mais que le serveur tourne déjà, on vérifie quand même
+        const ok = await waitForBackend(3000);
         if (mounted) {
-          setStatus("error");
-          setError(err instanceof Error ? err.message : String(err));
+          if (ok) {
+            setStatus("ready");
+          } else {
+            setStatus("error");
+            setError(err instanceof Error ? err.message : String(err));
+          }
         }
       }
     }
@@ -102,9 +137,7 @@ export function useBackend() {
 }
 
 /**
- * Poll /status avec un timeout strict par requête.
- * fetch() peut bloquer indéfiniment si la connexion TCP est ouverte
- * mais que le serveur ne répond pas — on force un timeout via AbortController.
+ * Poll /status avec timeout strict par requête.
  */
 async function waitForBackend(timeoutMs: number): Promise<boolean> {
   const startTime = Date.now();
@@ -123,21 +156,14 @@ async function waitForBackend(timeoutMs: number): Promise<boolean> {
       clearTimeout(fetchTimeout);
 
       if (res.ok) {
-        console.log(`[Backend] Prêt après ${attempts} tentative(s)`);
         return true;
       }
     } catch {
-      // Timeout ou erreur de connexion — on réessaie
-    }
-
-    if (attempts % 10 === 0) {
-      const elapsed = Math.round((Date.now() - startTime) / 1000);
-      console.log(`[Backend] En attente... ${elapsed}s`);
+      // ignore et réessaie
     }
 
     await new Promise((r) => setTimeout(r, 500));
   }
 
-  console.error(`[Backend] Timeout après ${timeoutMs / 1000}s`);
   return false;
 }

@@ -19,9 +19,13 @@ interface UseSpeechReturn {
 
 type BackendStatus = "unknown" | "available" | "unavailable";
 
+function detectLanguage(text: string): "en-US" | "fr-FR" {
+  const englishTokens = /\b(the|is|in|at|which|on|this|that|with|for|and|here|welcome|review|music|album|code|project|ready|draft|analyzed|inspected|hardware|autonomous)\b/i;
+  return englishTokens.test(text) ? "en-US" : "fr-FR";
+}
+
 export function useSpeech(options: UseSpeechOptions = {}): UseSpeechReturn {
   const {
-    lang = "fr-FR",
     rate = 1.0,
     pitch = 1.0,
     volume = 1.0,
@@ -42,7 +46,6 @@ export function useSpeech(options: UseSpeechOptions = {}): UseSpeechReturn {
   const browserSupported =
     typeof window !== "undefined" && "speechSynthesis" in window;
 
-  // Charge les voix navigateur (fallback)
   useEffect(() => {
     if (!browserSupported) return;
 
@@ -59,11 +62,7 @@ export function useSpeech(options: UseSpeechOptions = {}): UseSpeechReturn {
     };
   }, [browserSupported]);
 
-  // Détecte si Pocket TTS est dispo au premier appel
-  // (on ne teste pas au montage pour ne pas bloquer le démarrage)
-
   const stop = useCallback(() => {
-    // Stoppe Pocket TTS (audio element)
     if (audioRef.current) {
       audioRef.current.pause();
       audioRef.current.currentTime = 0;
@@ -74,7 +73,6 @@ export function useSpeech(options: UseSpeechOptions = {}): UseSpeechReturn {
       currentUrlRef.current = null;
     }
 
-    // Stoppe la voix navigateur
     if (browserSupported) {
       window.speechSynthesis.cancel();
     }
@@ -88,8 +86,11 @@ export function useSpeech(options: UseSpeechOptions = {}): UseSpeechReturn {
 
       window.speechSynthesis.cancel();
 
+      const targetLang = detectLanguage(text);
+      const prefix = targetLang.slice(0, 2);
+
       const utterance = new SpeechSynthesisUtterance(text);
-      utterance.lang = lang;
+      utterance.lang = targetLang;
       utterance.rate = rate;
       utterance.pitch = pitch;
       utterance.volume = volume;
@@ -98,10 +99,13 @@ export function useSpeech(options: UseSpeechOptions = {}): UseSpeechReturn {
         const selected = availableVoices.find((v) => v.name === voiceName);
         if (selected) utterance.voice = selected;
       } else {
-        const frenchVoice = availableVoices.find((v) =>
-          v.lang.startsWith("fr")
+        // Sélectionne une voix naturelle correspondant à la langue détectée
+        const matchingVoice = availableVoices.find(
+          (v) =>
+            v.lang.toLowerCase().startsWith(prefix) &&
+            (v.name.includes("Natural") || v.name.includes("Online") || true)
         );
-        if (frenchVoice) utterance.voice = frenchVoice;
+        if (matchingVoice) utterance.voice = matchingVoice;
       }
 
       utterance.onstart = () => setIsSpeaking(true);
@@ -111,7 +115,7 @@ export function useSpeech(options: UseSpeechOptions = {}): UseSpeechReturn {
       utteranceRef.current = utterance;
       window.speechSynthesis.speak(utterance);
     },
-    [browserSupported, lang, rate, pitch, volume, voiceName, availableVoices]
+    [browserSupported, rate, pitch, volume, voiceName, availableVoices]
   );
 
   const speakWithBackend = useCallback(
@@ -150,10 +154,17 @@ export function useSpeech(options: UseSpeechOptions = {}): UseSpeechReturn {
     (text: string) => {
       if (!text) return;
 
-      // Coupe toute lecture en cours
       stop();
 
-      // Tente Pocket TTS en priorité (si dispo ou statut inconnu)
+      const lang = detectLanguage(text);
+
+      // Si le texte est en anglais, on utilise directement la voix anglaise du navigateur
+      if (lang === "en-US") {
+        speakWithBrowser(text);
+        return;
+      }
+
+      // Pour le français, on tente Pocket TTS en priorité
       if (backendStatus !== "unavailable") {
         speakWithBackend(text)
           .then(() => {
@@ -172,13 +183,11 @@ export function useSpeech(options: UseSpeechOptions = {}): UseSpeechReturn {
         return;
       }
 
-      // Statut déjà "unavailable" → fallback direct
       speakWithBrowser(text);
     },
     [backendStatus, speakWithBackend, speakWithBrowser, stop]
   );
 
-  // Nettoyage à la fermeture
   useEffect(() => {
     return () => {
       stop();
@@ -187,7 +196,7 @@ export function useSpeech(options: UseSpeechOptions = {}): UseSpeechReturn {
   }, [browserSupported, stop]);
 
   return {
-    isSupported: true, // toujours true : Pocket TTS OU navigateur
+    isSupported: true,
     isSpeaking,
     speak,
     stop,

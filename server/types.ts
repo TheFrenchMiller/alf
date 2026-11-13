@@ -63,4 +63,6 @@ export interface ServerStatus {
 export interface StatusResponse {
   servers: ServerStatus[];
   totalTools: number;
+  hasApiKey?: boolean;
+  demoMode?: boolean;
 }

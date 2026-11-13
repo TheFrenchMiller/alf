@@ -7,16 +7,21 @@ interface ChatPanelProps {
   messages: ChatMessage[];
   onSend: (prompt: string) => void;
   disabled: boolean;
+  isDemoMode?: boolean;
 }
 
-export default function ChatPanel({ messages, onSend, disabled }: ChatPanelProps) {
+export default function ChatPanel({
+  messages,
+  onSend,
+  disabled,
+  isDemoMode = false,
+}: ChatPanelProps) {
   const [input, setInput] = useState("");
   const [isTranscribing, setIsTranscribing] = useState(false);
   const [micError, setMicError] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // --- Enregistrement audio ---
   const {
     isRecording,
     isSupported: micSupported,
@@ -26,12 +31,10 @@ export default function ChatPanel({ messages, onSend, disabled }: ChatPanelProps
     duration,
   } = useAudioRecorder();
 
-  // Synchronise l'erreur du recorder dans l'état local
   useEffect(() => {
     if (recorderError) setMicError(recorderError);
   }, [recorderError]);
 
-  // Auto-scroll vers le bas quand un nouveau message arrive
   useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
@@ -50,7 +53,6 @@ export default function ChatPanel({ messages, onSend, disabled }: ChatPanelProps
     setMicError(null);
 
     if (isRecording) {
-      // Arrête l'enregistrement et transcrit
       setIsTranscribing(true);
       const result = await stopRec();
       if (!result) {
@@ -65,7 +67,6 @@ export default function ChatPanel({ messages, onSend, disabled }: ChatPanelProps
           setMicError(`Transcription échouée : ${res.error}`);
         } else if (res.text) {
           setInput((prev) => (prev ? prev + " " + res.text : res.text));
-          // Focus sur l'input pour que l'utilisateur puisse valider direct
           setTimeout(() => inputRef.current?.focus(), 100);
         } else {
           setMicError("Aucune parole détectée.");
@@ -76,7 +77,6 @@ export default function ChatPanel({ messages, onSend, disabled }: ChatPanelProps
         setIsTranscribing(false);
       }
     } else {
-      // Démarre l'enregistrement
       await startRec();
     }
   };
@@ -95,18 +95,34 @@ export default function ChatPanel({ messages, onSend, disabled }: ChatPanelProps
     return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
   };
 
-  // Texte affiché dans l'input
   const placeholder = isRecording
     ? `🎤 Enregistrement... (${formatDuration(duration)}) — clique ⏹ pour transcrire`
     : isTranscribing
     ? "Transcription en cours..."
     : disabled
     ? "Alf réfléchit..."
-    : "Écris ton message ou clique sur le micro...";
+    : "Écris ton message ou clique sur le micro... / Type in French or English...";
+
+  const demoSuggestions = [
+    {
+      title: "Rédiger une chronique WARM-TV · Write a music review",
+      desc: "Créer un article rock avec mise en valeur SEO · Generate complete rock review",
+      prompt: "Rédige une chronique pour WARM-TV sur le nouvel album de Gojira.",
+    },
+    {
+      title: "Inspecter les emails RP · Triage press emails",
+      desc: "Trier les communiqués et extraire les photos · Filter PR releases and extract visuals",
+      prompt: "Vérifie les nouveaux emails de relations presse et résume-moi les actualités.",
+    },
+    {
+      title: "Analyser l'architecture du code · Audit code architecture",
+      desc: "Évaluer l'optimisation pour ASUS NPU · Evaluate ASUS NPU & RTX optimization",
+      prompt: "Inspect the project architecture and suggest optimizations for ASUS hardware.",
+    },
+  ];
 
   return (
     <div className="h-full flex flex-col bg-alf-bg">
-      {/* En-tête */}
       <div className="p-4 border-b border-alf-border">
         <div className="text-sm font-semibold text-alf-text">Conversation</div>
         <div className="text-xs text-alf-muted">
@@ -114,7 +130,6 @@ export default function ChatPanel({ messages, onSend, disabled }: ChatPanelProps
         </div>
       </div>
 
-      {/* Bandeau erreur micro */}
       {micError && (
         <div className="bg-red-950/40 border-b border-red-800 text-red-300 px-4 py-2 text-xs flex items-center justify-between">
           <span>{micError}</span>
@@ -127,9 +142,42 @@ export default function ChatPanel({ messages, onSend, disabled }: ChatPanelProps
         </div>
       )}
 
-      {/* Historique */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-4">
-        {messages.length === 0 && (
+        {messages.length === 0 && isDemoMode && (
+          <div className="max-w-xl mx-auto my-6 space-y-4">
+            <div className="text-center">
+              <h2 className="text-base font-medium text-alf-text">
+                Bienvenue dans le démonstrateur Alf · Welcome to Alf
+              </h2>
+              <p className="text-xs text-alf-muted mt-1">
+                Choisissez une suggestion rapide ou tapez en français ou en anglais.
+                <br />
+                Select a quick scenario or type freely in English or French.
+              </p>
+            </div>
+
+            <div className="grid grid-cols-1 gap-2 pt-2">
+              {demoSuggestions.map((item, idx) => (
+                <button
+                  key={idx}
+                  type="button"
+                  onClick={() => onSend(item.prompt)}
+                  disabled={disabled}
+                  className="p-3 text-left rounded-lg border border-alf-border bg-alf-panel hover:border-alf-accent transition-all group disabled:opacity-50"
+                >
+                  <div className="text-xs font-semibold text-alf-text group-hover:text-alf-accent">
+                    {item.title}
+                  </div>
+                  <div className="text-[11px] text-alf-muted mt-0.5">
+                    {item.desc}
+                  </div>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {messages.length === 0 && !isDemoMode && (
           <div className="text-center text-alf-muted text-sm mt-8">
             Commence par poser une question à Alf...
           </div>
@@ -150,7 +198,7 @@ export default function ChatPanel({ messages, onSend, disabled }: ChatPanelProps
               }`}
             >
               <div className="text-xs opacity-60 mb-1">
-                {msg.role === "user" ? "Toi" : "Alf"} · {formatTime(msg.timestamp)}
+                {msg.role === "user" ? "Toi / You" : "Alf"} · {formatTime(msg.timestamp)}
               </div>
               <div className="text-sm whitespace-pre-wrap break-words">
                 {msg.content}
@@ -166,7 +214,6 @@ export default function ChatPanel({ messages, onSend, disabled }: ChatPanelProps
         ))}
       </div>
 
-      {/* Formulaire de saisie */}
       <form
         onSubmit={handleSubmit}
         className="p-4 border-t border-alf-border flex gap-2"
@@ -181,7 +228,6 @@ export default function ChatPanel({ messages, onSend, disabled }: ChatPanelProps
           className="flex-1 px-4 py-2 rounded-md bg-alf-panel border border-alf-border text-alf-text text-sm focus:outline-none focus:border-alf-accent disabled:opacity-50"
         />
 
-        {/* Bouton micro */}
         {micSupported && (
           <button
             type="button"
