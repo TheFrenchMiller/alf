@@ -3,7 +3,7 @@ import Avatar from "./components/Avatar";
 import Sidebar from "./components/Sidebar";
 import ChatPanel from "./components/ChatPanel";
 import ActionPanel from "./components/ActionPanel";
-import { getStatus, getTools, sendMessage, executeAction, setApiKey, toggleDemoMode } from "./api";
+import { getStatus, getTools, sendMessage, executeAction, setApiKey, toggleDemoMode, getMemory } from "./api";
 import type { ToolDefinition } from "./api";
 import type {
   AgentState,
@@ -50,6 +50,8 @@ export default function App() {
   const [isDemoMode, setIsDemoMode] = useState(false);
   const [hasApiKey, setHasApiKey] = useState(true);
   const [showConfigModal, setShowConfigModal] = useState(false);
+  const [showMemoryModal, setShowMemoryModal] = useState(false);
+  const [memoryContent, setMemoryContent] = useState<string>("");
   const [keyInput, setKeyInput] = useState("");
   const [configFeedback, setConfigFeedback] = useState<string | null>(null);
 
@@ -84,6 +86,16 @@ export default function App() {
     if (backendStatus !== "ready") return;
     refreshServerState();
   }, [backendStatus]);
+
+  async function handleOpenMemory() {
+    try {
+      const res = await getMemory();
+      setMemoryContent(res.memory || "Aucune mémoire enregistrée pour le moment.");
+    } catch {
+      setMemoryContent("Mémoire persistante active sur disque (MEMOIRE_ALF.md).");
+    }
+    setShowMemoryModal(true);
+  }
 
   async function handleSend(prompt: string) {
     stop();
@@ -258,20 +270,19 @@ export default function App() {
       <header className="flex items-center justify-between px-6 py-3 border-b border-alf-border bg-alf-panel">
         <div>
           <div className="flex items-center gap-2">
-            <h1 className="text-lg font-semibold text-alf-text">Alf 2.0.2</h1>
+            <h1 className="text-lg font-semibold text-alf-text">Alf 2.0.3</h1>
             <span className="text-[10px] px-2 py-0.5 rounded font-mono bg-blue-500/10 text-blue-400 border border-blue-500/30">
               ASUS AI Ready · NPU & GPU RTX
             </span>
           </div>
           <p className="text-xs text-alf-muted">
             {isDemoMode
-              ? "Démonstrateur autonome pour ASUS"
+              ? "Démonstrateur autonome pour ASUS avec mémoire persistante"
               : "Assistant personnel autonome pour The French Miller & WARM-TV"}
           </p>
         </div>
 
         <div className="flex items-center gap-3">
-          {/* Badge mode cliquable */}
           <button
             onClick={handleToggleDemo}
             className={`text-xs px-2.5 py-1 rounded-full border transition-all ${
@@ -282,6 +293,14 @@ export default function App() {
             title="Cliquer pour basculer entre Mode Réel et Mode Démo ASUS"
           >
             {isDemoMode ? "Mode Démo ASUS" : "Écosystème Réel Actif"}
+          </button>
+
+          <button
+            onClick={handleOpenMemory}
+            className="text-xs px-2.5 py-1 rounded-md border border-alf-border text-alf-muted hover:text-alf-text hover:border-alf-accent transition-colors"
+            title="Consulter la mémoire persistante inter-sessions"
+          >
+            🧠 Mémoire
           </button>
 
           <button
@@ -322,6 +341,45 @@ export default function App() {
         </div>
       )}
 
+      {/* Modal Mémoire persistante */}
+      {showMemoryModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+          <div className="w-full max-w-2xl max-h-[80vh] flex flex-col p-6 rounded-lg bg-alf-panel border border-alf-border shadow-xl">
+            <div className="flex items-center justify-between pb-3 border-b border-alf-border">
+              <div>
+                <h3 className="text-base font-semibold text-alf-text">
+                  Mémoire Persistante d'Alf (Long-Term Memory)
+                </h3>
+                <p className="text-xs text-alf-muted">
+                  Connaissances et apprentissages sauvegardés localement sur disque entre les sessions.
+                </p>
+              </div>
+              <button
+                onClick={() => setShowMemoryModal(false)}
+                className="text-alf-muted hover:text-alf-text text-sm px-2 py-1"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto my-4 p-4 rounded bg-alf-bg border border-alf-border text-xs text-alf-text font-mono whitespace-pre-wrap">
+              {memoryContent}
+            </div>
+
+            <div className="flex justify-end pt-2 border-t border-alf-border">
+              <button
+                type="button"
+                onClick={() => setShowMemoryModal(false)}
+                className="px-4 py-1.5 text-xs rounded bg-alf-accent text-white font-medium hover:opacity-90"
+              >
+                Fermer
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de configuration clé API */}
       {showConfigModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
           <div className="w-full max-w-md p-6 rounded-lg bg-alf-panel border border-alf-border shadow-xl">

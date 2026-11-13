@@ -1,5 +1,7 @@
 import { GoogleGenAI } from "@google/genai";
 import { randomUUID } from "crypto";
+import { existsSync, readFileSync } from "fs";
+import { resolve } from "path";
 import { McpManager } from "./mcp-manager.js";
 import type {
   Action,
@@ -16,6 +18,18 @@ const TOOLS_REQUIRING_VALIDATION = new Set([
   "wp_uploader_media",
   "preparer_article_avec_images",
 ]);
+
+function loadPersistentMemory(): string {
+  try {
+    const memoryPath = resolve(process.cwd(), "MEMOIRE_ALF.md");
+    if (existsSync(memoryPath)) {
+      return readFileSync(memoryPath, "utf-8");
+    }
+  } catch {
+    // ignore
+  }
+  return "";
+}
 
 const SYSTEM_INSTRUCTION = `Tu es Alf, l'assistant personnel autonome d'Erwan (The French Miller / WARM-TV / Wearerockmetal).
 
@@ -329,11 +343,16 @@ export class Orchestrator {
 
   private getOrCreateChat(conversationId: string) {
     if (!this.conversations.has(conversationId)) {
+      const memory = loadPersistentMemory();
+      const instruction = memory
+        ? `${SYSTEM_INSTRUCTION}\n\n## MÉMOIRE PERSISTANTE INTER-SESSIONS (CHARGÉE DU DISQUE LOCAL)\n${memory}`
+        : SYSTEM_INSTRUCTION;
+
       const chat = this.ai.chats.create({
         model: "gemini-3.8-flash",
         config: {
           tools: [this.buildGeminiTools()],
-          systemInstruction: SYSTEM_INSTRUCTION,
+          systemInstruction: instruction,
         },
       });
       this.conversations.set(conversationId, chat);
@@ -460,21 +479,16 @@ export class Orchestrator {
           ],
         });
 
-        // gemini-3.5-transcribe renvoie le texte dans audioTranscription,
-        // pas dans response.text. On parcourt les parts manuellement.
         const candidate = response.candidates?.[0];
         const parts = candidate?.content?.parts || [];
 
         let transcript = "";
 
         for (const part of parts) {
-          // Priorité au text classique s'il existe
           if (part.text) {
             transcript += part.text;
             continue;
           }
-          // Sinon, on récupère audioTranscription.text
-          // (champ non typé dans le SDK, d'où le cast)
           const audioTrans = (part as any).audioTranscription;
           if (audioTrans?.text) {
             transcript += audioTrans.text;

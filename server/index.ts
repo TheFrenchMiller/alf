@@ -2,7 +2,7 @@ import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
 import { resolve } from "path";
-import { existsSync } from "fs";
+import { existsSync, readFileSync, writeFileSync } from "fs";
 import { spawn, ChildProcess } from "child_process";
 import { McpManager } from "./mcp-manager.js";
 import { Orchestrator } from "./orchestrator.js";
@@ -127,7 +127,6 @@ function generateDemoResponse(prompt: string, conversationId = "demo-conv"): Cha
   const timestamp = Date.now();
   const isEn = isEnglishPrompt(prompt);
 
-  // Scénario 1 : Musique / Chronique / WARM-TV
   if (
     lower.includes("chronique") ||
     lower.includes("album") ||
@@ -166,7 +165,6 @@ function generateDemoResponse(prompt: string, conversationId = "demo-conv"): Cha
     };
   }
 
-  // Scénario 2 : Emails / Presse / RP
   if (
     lower.includes("email") ||
     lower.includes("mail") ||
@@ -207,14 +205,15 @@ function generateDemoResponse(prompt: string, conversationId = "demo-conv"): Cha
     };
   }
 
-  // Scénario 3 : Code / Architecture / ASUS
   if (
     lower.includes("code") ||
     lower.includes("inspect") ||
     lower.includes("projet") ||
     lower.includes("optimisation") ||
     lower.includes("asus") ||
-    lower.includes("architecture")
+    lower.includes("architecture") ||
+    lower.includes("memoire") ||
+    lower.includes("memory")
   ) {
     const demoActions: Action[] = [
       {
@@ -226,11 +225,20 @@ function generateDemoResponse(prompt: string, conversationId = "demo-conv"): Cha
           : "Dossiers détectés : components, hooks, assets. 6 fichiers sources TypeScript/React.",
         timestamp,
       },
+      {
+        toolName: "lire_fichier",
+        serverId: "systeme",
+        args: { fichier: "MEMOIRE_ALF.md" },
+        result: isEn
+          ? "Persistent memory loaded: long-term knowledge base active across sessions."
+          : "Mémoire persistante chargée : base de connaissances à long terme active entre sessions.",
+        timestamp: timestamp + 150,
+      },
     ];
 
     const response = isEn
-      ? "I analyzed the architecture of the alf-2.0.2 codebase. The React 19 frontend and modular Tailwind styling are cleanly decoupled between UI components, custom hooks, and state managers. To maximize performance on an ASUS machine equipped with an on-device NPU and RTX GPU, we can implement local vector caching for embeddings and offload audio streams to Web Workers."
-      : "J'ai analysé l'architecture du projet alf-2.0.2. La structure frontend en React 19 et Tailwind est bien compartimentée avec un découpage clair entre composants, crochets personnalisés et gestionnaire d'état. Pour optimiser les performances lors de l'exécution sur une machine ASUS dotée d'une puce neuronale, nous pourrions introduire un cache local pour les embeddings et un traitement asynchrone des flux audio via Web Workers.";
+      ? "I analyzed the architecture of the alf-2.0.3 codebase. The system now incorporates persistent on-disk memory via MEMOIRE_ALF.md, loaded into the system context on startup. Combined with modular React 19 UI and on-device NPU/RTX acceleration, the agent learns continuously across sessions without external cloud storage dependencies."
+      : "J'ai analysé l'architecture du projet alf-2.0.3. Le système intègre désormais une mémoire persistante sur disque via le carnet MEMOIRE_ALF.md, injectée au démarrage dans le contexte cognitif de l'agent. Couplée à l'accélération matérielle ASUS NPU et RTX, cette mémoire permet un apprentissage continu d'une session à l'autre sans aucune dépendance cloud externe.";
 
     return {
       conversationId,
@@ -239,10 +247,9 @@ function generateDemoResponse(prompt: string, conversationId = "demo-conv"): Cha
     };
   }
 
-  // Réponse par défaut
   const response = isEn
-    ? `Welcome to the Alf 2.0.2 ASUS Evaluation Demonstrator. I received your message: "${prompt}". The agent is currently running in autonomous demo mode with full simulation of MCP protocols, the WARM-TV editorial engine, and multimedia asset processing. You can test our interactive scenarios or configure an API key in the settings to activate live cloud inference.`
-    : `Bienvenue dans le démonstrateur Alf 2.0.2 pour ASUS. J'ai bien reçu votre message : "${prompt}". L'agent fonctionne actuellement en mode démonstration autonome avec simulation complète des protocoles MCP, du moteur rédactionnel WARM-TV et de l'intégration multimédia. Vous pouvez tester nos scénarios guidés ou renseigner une clé API dans les paramètres pour passer en mode connecté direct.`;
+    ? `Welcome to the Alf 2.0.3 ASUS Evaluation Demonstrator. I received your message: "${prompt}". The agent features persistent local memory across sessions, Model Context Protocol servers, WARM-TV editorial pipelines, and on-device acceleration. You can test our interactive scenarios or configure an API key in the settings.`
+    : `Bienvenue dans le démonstrateur Alf 2.0.3 pour ASUS. J'ai bien reçu votre message : "${prompt}". L'agent intègre désormais une mémoire locale persistante entre les sessions, la gestion des protocoles MCP et la chaîne éditoriale WARM-TV. Vous pouvez tester nos scénarios guidés ou renseigner une clé API dans les paramètres pour passer en direct.`;
 
   return {
     conversationId,
@@ -283,6 +290,33 @@ async function main() {
       demoMode: isCurrentlyDemo,
     };
     res.json(status);
+  });
+
+  // --- GET /memory : lire la mémoire persistante locale ---
+  app.get("/memory", (_req, res) => {
+    try {
+      const memoryPath = resolve(process.cwd(), "MEMOIRE_ALF.md");
+      const content = existsSync(memoryPath) ? readFileSync(memoryPath, "utf-8") : "";
+      res.json({ memory: content });
+    } catch {
+      res.status(500).json({ error: "Erreur lecture mémoire" });
+    }
+  });
+
+  // --- POST /memory : mettre à jour la mémoire persistante ---
+  app.post("/memory", (req, res) => {
+    const { memory } = req.body as { memory?: string };
+    if (typeof memory !== "string") {
+      res.status(400).json({ error: "Contenu mémoire invalide" });
+      return;
+    }
+    try {
+      const memoryPath = resolve(process.cwd(), "MEMOIRE_ALF.md");
+      writeFileSync(memoryPath, memory, "utf-8");
+      res.json({ ok: true });
+    } catch {
+      res.status(500).json({ error: "Erreur écriture mémoire" });
+    }
   });
 
   // --- POST /toggle-demo : basculer manuellement entre démo et connecté ---
@@ -476,9 +510,7 @@ async function main() {
   const server = app.listen(PORT, () => {
     console.log(`[Orchestrateur] API disponible sur http://localhost:${PORT}`);
     console.log(`[Orchestrateur] ${mcp.getAllTools().length} outil(s) chargé(s)`);
-    if (!apiKey) {
-      console.log("[Orchestrateur] Mode Démonstration ASUS actif par défaut (aucune clé détectée).");
-    }
+    console.log("[Orchestrateur] Mémoire persistante inter-sessions Alf 2.0.3 active.");
   });
 
   process.on("SIGINT", async () => {

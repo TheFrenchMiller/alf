@@ -67,6 +67,12 @@ export async function getStatus(): Promise<StatusResponse> {
   return res.json();
 }
 
+export async function getMemory(): Promise<{ memory: string }> {
+  const res = await fetch(`${API_BASE}/memory`);
+  if (!res.ok) throw new Error(`Erreur mémoire: ${res.status}`);
+  return res.json();
+}
+
 export async function setApiKey(apiKey: string): Promise<{ ok: boolean }> {
   const res = await fetch(`${API_BASE}/api-key`, {
     method: "POST",
