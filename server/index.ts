@@ -12,13 +12,17 @@ const envPath =
   process.env.ALF_ENV_PATH || resolve(process.cwd(), "../mcp-servers/.env");
 
 console.log(`[Orchestrateur] Chargement du .env depuis : ${envPath}`);
-dotenv.config({ path: envPath });
+dotenv.config({ path: envPath, override: true });
 
 const PORT = 3001;
 const POCKET_TTS_PORT = 8000;
-const POCKET_TTS_URL = `http://localhost:${POCKET_TTS_PORT}`;
-const POCKET_TTS_VOICE = process.env.POCKET_TTS_VOICE || "estelle";
+const POCKET_TTS_URL = `http://127.0.0.1:${POCKET_TTS_PORT}`;
+const POCKET_TTS_VOICE =
+  process.env.POCKET_TTS_VOICE ||
+  "D:/Documents/2026 - Web/2026.09_GEMINI_AGENT/alf.safetensors";
 const POCKET_TTS_LANG = process.env.POCKET_TTS_LANG || "french";
+
+console.log(`[Orchestrateur] Voix de synthese active : ${POCKET_TTS_VOICE}`);
 
 let pocketTtsProcess: ChildProcess | null = null;
 let pocketTtsAvailable = false;
@@ -35,7 +39,7 @@ async function isPocketTtsAlive(): Promise<boolean> {
   }
 }
 
-async function waitForPocketTts(timeoutMs = 60000): Promise<boolean> {
+async function waitForPocketTts(timeoutMs = 90000): Promise<boolean> {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
     if (await isPocketTtsAlive()) return true;
@@ -57,6 +61,10 @@ async function startPocketTts(): Promise<void> {
   console.log(`[PocketTTS] Lancement de la voix naturelle (${POCKET_TTS_VOICE}) via ${uvxExecutable}...`);
 
   try {
+    const voiceArg = POCKET_TTS_VOICE.includes(" ")
+      ? `"${POCKET_TTS_VOICE}"`
+      : POCKET_TTS_VOICE;
+
     pocketTtsProcess = spawn(
       uvxExecutable,
       [
@@ -65,11 +73,12 @@ async function startPocketTts(): Promise<void> {
         "--language",
         POCKET_TTS_LANG,
         "--default-voice",
-        POCKET_TTS_VOICE,
+        voiceArg,
       ],
       {
         stdio: ["ignore", "pipe", "pipe"],
         shell: true,
+        env: process.env,
       }
     );
 
@@ -93,9 +102,9 @@ async function startPocketTts(): Promise<void> {
       pocketTtsProcess = null;
     });
 
-    const ready = await waitForPocketTts(60000);
+    const ready = await waitForPocketTts(90000);
     if (ready) {
-      console.log("[PocketTTS] Serveur de voix naturelle Estelle prêt.");
+      console.log("[PocketTTS] Serveur de voix naturelle prêt.");
       pocketTtsAvailable = true;
     } else {
       console.warn("[PocketTTS] Délai d'attente dépassé, voix navigateur active.");
@@ -465,6 +474,11 @@ async function main() {
       return;
     }
 
+    // Si le statut local indiquait indisponible, on tente un check dynamique au cas où le serveur a démarré
+    if (!pocketTtsAvailable) {
+      pocketTtsAvailable = await isPocketTtsAlive();
+    }
+
     if (!pocketTtsAvailable) {
       res.status(503).json({
         error: "Pocket TTS non disponible",
@@ -474,9 +488,20 @@ async function main() {
     }
 
     try {
+      console.log(`[PocketTTS /speak] Synthese en cours avec la voix : ${POCKET_TTS_VOICE}`);
       const form = new FormData();
       form.append("text", text);
-      form.append("voice_url", POCKET_TTS_VOICE);
+
+      // voice_url n'accepte qu'une URL distante ou un identifiant prédéfini.
+      // Un chemin de fichier local Windows provoque une erreur HTTP 400 Bad Request.
+      // La voix locale est déjà prise en compte par le serveur grâce au paramètre --default-voice.
+      if (
+        POCKET_TTS_VOICE.startsWith("http://") ||
+        POCKET_TTS_VOICE.startsWith("https://") ||
+        POCKET_TTS_VOICE.startsWith("hf://")
+      ) {
+        form.append("voice_url", POCKET_TTS_VOICE);
+      }
 
       const ttsRes = await fetch(`${POCKET_TTS_URL}/tts`, {
         method: "POST",
@@ -499,6 +524,7 @@ async function main() {
       res.setHeader("Content-Length", audioBuffer.length.toString());
       res.send(audioBuffer);
     } catch (error) {
+      console.error("[PocketTTS /speak] Erreur :", error);
       res.status(500).json({
         error: error instanceof Error ? error.message : String(error),
         fallback: "browser",

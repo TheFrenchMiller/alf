@@ -17,10 +17,8 @@ interface UseSpeechReturn {
   availableVoices: SpeechSynthesisVoice[];
 }
 
-type BackendStatus = "unknown" | "available" | "unavailable";
-
 function detectLanguage(text: string): "en-US" | "fr-FR" {
-  const englishTokens = /\b(the|is|in|at|which|on|this|that|with|for|and|here|welcome|review|music|album|code|project|ready|draft|analyzed|inspected|hardware|autonomous)\b/i;
+  const englishTokens = /\b(the|this|that|which|with|here|welcome|ready|analyzed|inspected|hardware|autonomous|review)\b/i;
   return englishTokens.test(text) ? "en-US" : "fr-FR";
 }
 
@@ -36,8 +34,6 @@ export function useSpeech(options: UseSpeechOptions = {}): UseSpeechReturn {
   const [availableVoices, setAvailableVoices] = useState<
     SpeechSynthesisVoice[]
   >([]);
-  const [backendStatus, setBackendStatus] =
-    useState<BackendStatus>("unknown");
 
   const utteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
@@ -99,13 +95,24 @@ export function useSpeech(options: UseSpeechOptions = {}): UseSpeechReturn {
         const selected = availableVoices.find((v) => v.name === voiceName);
         if (selected) utterance.voice = selected;
       } else {
-        // Sélectionne une voix naturelle correspondant à la langue détectée
-        const matchingVoice = availableVoices.find(
-          (v) =>
-            v.lang.toLowerCase().startsWith(prefix) &&
-            (v.name.includes("Natural") || v.name.includes("Online") || true)
+        // Filtrer les voix de la langue cible
+        const matchingVoices = availableVoices.filter((v) =>
+          v.lang.toLowerCase().startsWith(prefix)
         );
-        if (matchingVoice) utterance.voice = matchingVoice;
+
+        // Priorité aux voix haute fidélité (Natural, Online ou Neural)
+        const premiumVoice = matchingVoices.find(
+          (v) =>
+            v.name.includes("Natural") ||
+            v.name.includes("Online") ||
+            v.name.includes("Neural")
+        );
+
+        if (premiumVoice) {
+          utterance.voice = premiumVoice;
+        } else if (matchingVoices.length > 0) {
+          utterance.voice = matchingVoices[0];
+        }
       }
 
       utterance.onstart = () => setIsSpeaking(true);
@@ -158,34 +165,22 @@ export function useSpeech(options: UseSpeechOptions = {}): UseSpeechReturn {
 
       const lang = detectLanguage(text);
 
-      // Si le texte est en anglais, on utilise directement la voix anglaise du navigateur
+      // Si le texte est en anglais, utiliser la voix premium anglaise du navigateur
       if (lang === "en-US") {
         speakWithBrowser(text);
         return;
       }
 
-      // Pour le français, on tente Pocket TTS en priorité
-      if (backendStatus !== "unavailable") {
-        speakWithBackend(text)
-          .then(() => {
-            if (backendStatus === "unknown") {
-              setBackendStatus("available");
-            }
-          })
-          .catch((err) => {
-            console.warn(
-              "[Speech] Pocket TTS indisponible, fallback navigateur :",
-              err.message
-            );
-            setBackendStatus("unavailable");
-            speakWithBrowser(text);
-          });
-        return;
-      }
-
-      speakWithBrowser(text);
+      // En français, Pocket TTS est tenté en priorité
+      speakWithBackend(text).catch((err) => {
+        console.warn(
+          "[Speech] Pocket TTS indisponible, bascule navigateur :",
+          err.message
+        );
+        speakWithBrowser(text);
+      });
     },
-    [backendStatus, speakWithBackend, speakWithBrowser, stop]
+    [speakWithBackend, speakWithBrowser, stop]
   );
 
   useEffect(() => {

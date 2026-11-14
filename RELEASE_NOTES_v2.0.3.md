@@ -8,7 +8,7 @@
 
 ---
 
-> **Alf 2.0.3** marks the official initial public release of an autonomous, multimodal personal AI assistant. Originally engineered and battle-tested as an in-house production copilot for the **WARM-TV** rock/metal webzine and **The French Miller** communication agency, this milestone delivers an installable desktop experience with **local persistent memory**, **autonomous evaluation mode**, and **on-device edge acceleration readiness**.
+> **Alf 2.0.3** marks the official initial public release of an autonomous, multimodal personal AI assistant. Originally engineered and battle-tested as an in-house production copilot for the **WARM-TV** rock/metal webzine and **The French Miller** communication agency, this milestone delivers an installable desktop experience with **local persistent memory**, **zero-latency custom voice cloning**, **autonomous evaluation mode**, and **on-device edge acceleration readiness**.
 
 ---
 
@@ -33,11 +33,13 @@
   - 📧 **Press Relations Triage**: Simulates inbox scanning, VIP email extraction, and promo visual sorting.
   - 💻 **Architecture & Code Audit**: Inspects project codebases and outlines edge hardware optimizations.
 
-### 🌐 Resilient Bilingual Vocal Engine (FR / EN)
+### 🌐 Resilient Bilingual Vocal Engine & Zero-Latency Voice Cloning
 - **Automatic Language Detection**: Evaluates prompts in real time; responds in fluent French or English.
-- **Dual-Tier Resilient Voice**:
-  - **Tier 1 (Local Neural TTS)**: High-fidelity natural voice synthesis via Pocket TTS (`estelle`).
-  - **Tier 2 (Operating System Fallback)**: Automatically falls back to native Windows/Edge speech synthesis (Microsoft Natural English or French voices) when running on a fresh machine.
+- **On-Device Neural Voice Cloning (`safetensors`)**: Alf now supports instant custom voice cloning running 100% locally on CPU/NPU. Audio prompts are pre-encoded into optimized model tensors (`alf.safetensors` via `pocket-tts export-voice`), bypassing runtime encoding overhead.
+- **Hugging Face Hub Integration**: Authenticated voice weights verification via `HF_TOKEN` for Kyutai community-licensed models.
+- **Dual-Tier Resilient Fallback**:
+  - **Tier 1 (Local Neural TTS)**: High-fidelity natural custom voice (`alf.safetensors`), with native catalog fallback (`estelle`, `javert`).
+  - **Tier 2 (Operating System Fallback)**: Automatically falls back to native Windows/Edge speech synthesis (Microsoft Natural English or French voices) when running on a system without local Python/uvx.
 
 ### ⚡ Edge-First & Next-Gen Hardware Acceleration
 - **Engineered for AI PCs**: Built to leverage the dedicated Neural Processing Units (NPU) and NVIDIA GeForce RTX Tensor Cores found on modern hardware such as ASUS ROG, TUF, and ProArt machines.
@@ -54,7 +56,7 @@
 | **Tool Orchestration** | 24 business tools across 5 isolated domains with human-in-the-loop security | Model Context Protocol (MCP) |
 | **Memory System** | On-disk markdown memory ledger, inter-session persistence, memory inspector modal | Local File System, Context Injection |
 | **Media & Vision** | High-resolution album art extraction, press kit image triage, noise elimination | Multimodal Vision, Sharp, Canvas |
-| **Vocal Interface** | Real-time speech transcription and natural voice synthesis with OS fallback | Web Speech API, Pocket TTS, uvx |
+| **Vocal Interface** | Real-time speech transcription, on-device neural voice cloning (`safetensors`), and natural voice synthesis with OS fallback | Web Speech API, Pocket TTS, uvx |
 
 ---
 
